@@ -174,6 +174,7 @@ impl Ram {
             }
         }
 
+        tmp_ct.trace_inplace(module, 0, module.log_n(), auto_keys, scratch);
         tmp_ct
     }
 }
