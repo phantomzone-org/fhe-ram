@@ -1,0 +1,10 @@
+[package]
+name = "fhe-ram"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+core = { path = "../poulpy/core" }
+backend = { path = "../poulpy/backend" }
+sampling = { path = "../poulpy/sampling" }
+itertools = "0.14.0"
