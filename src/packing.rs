@@ -1,9 +1,9 @@
-use core::glwe_ciphertext::GLWECiphertext;
+use core::{automorphism::AutomorphismKey, elem::Infos, glwe_ciphertext::GLWECiphertext};
+use std::collections::HashMap;
 
-use backend::{Module, Scratch, VecZnx, VecZnxToMut, VecZnxToRef, FFT64};
+use backend::{FFT64, MatZnxDft, MatZnxDftToRef, Module, Scratch, VecZnx, VecZnxToRef};
 
 pub(crate) struct StreamPacker {
-    basek: usize,
     accumulators: Vec<Accumulator>,
     counter: usize,
 }
@@ -30,7 +30,6 @@ impl StreamPacker {
         let log_n: usize = module.log_n();
         (0..log_n).for_each(|_| accumulators.push(Accumulator::alloc(module, basek, k, rank)));
         Self {
-            basek: basek,
             accumulators: accumulators,
             counter: 0,
         }
@@ -44,24 +43,18 @@ impl StreamPacker {
         self.counter = 0;
     }
 
-    pub(crate) fn add<DataRes, DataA>(
+    pub(crate) fn add<DataA, DataAK>(
         &mut self,
         module: &Module<FFT64>,
-        res: &mut Vec<GLWECiphertext<DataRes>>,
+        res: &mut Vec<GLWECiphertext<Vec<u8>>>,
         a: Option<&GLWECiphertext<DataA>>,
+        auto_keys: &HashMap<i64, AutomorphismKey<DataAK, FFT64>>,
         scratch: &mut Scratch,
     ) where
-        VecZnx<DataRes>: VecZnxToMut + VecZnxToRef,
         VecZnx<DataA>: VecZnxToRef,
+        MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
     {
-        pack_core(
-            module,
-            self.basek,
-            a,
-            &mut self.accumulators,
-            0,
-            scratch,
-        );
+        pack_core(module, a, &mut self.accumulators, 0, auto_keys, scratch);
         self.counter += 1;
         if self.counter == module.n() {
             res.push(self.accumulators[module.log_n() - 1].data.clone());
@@ -69,25 +62,40 @@ impl StreamPacker {
         }
     }
 
-    pub(crate) fn flush<DataRes>(&mut self, module: &Module<FFT64>, res: &mut Vec<GLWECiphertext<DataRes>>)
-    where
-        VecZnx<DataRes>: VecZnxToMut + VecZnxToRef,
+    pub(crate) fn flush<DataAK>(
+        &mut self,
+        module: &Module<FFT64>,
+        res: &mut Vec<GLWECiphertext<Vec<u8>>>,
+        auto_keys: &HashMap<i64, AutomorphismKey<DataAK, FFT64>>,
+        scratch: &mut Scratch,
+    ) where
+        MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
     {
         if self.counter != 0 {
             while self.counter != module.n() - 1 {
-                self.add(module, res, None);
+                self.add(
+                    module,
+                    res,
+                    None::<&GLWECiphertext<Vec<u8>>>,
+                    auto_keys,
+                    scratch,
+                );
             }
         }
     }
 }
 
-fn pack_core<D>(
+fn pack_core<D, DataAK>(
     module: &Module<FFT64>,
     a: Option<&GLWECiphertext<D>>,
     accumulators: &mut [Accumulator],
     i: usize,
+    auto_keys: &HashMap<i64, AutomorphismKey<DataAK, FFT64>>,
     scratch: &mut Scratch,
-) where VecZnx<D>: VecZnxToRef{
+) where
+    VecZnx<D>: VecZnxToRef,
+    MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
+{
     let log_n = module.log_n();
 
     if i == log_n {
@@ -100,44 +108,110 @@ fn pack_core<D>(
         let acc_mut_ref: &mut Accumulator = &mut acc_prev[0]; // from split_at_mut
 
         if let Some(a_ref) = a {
-            acc_mut_ref.data.copy_from(a_ref);
+            acc_mut_ref.data.copy(module, a_ref);
             acc_mut_ref.value = true
         } else {
             acc_mut_ref.value = false
         }
         acc_mut_ref.control = true;
     } else {
-        combine(module, &mut acc_prev[0], a, i, scratch);
+        combine(module, &mut acc_prev[0], a, i, auto_keys, scratch);
 
         acc_prev[0].control = false;
 
         if acc_prev[0].value {
-            pack_core(
+            pack_core::<Vec<u8>, _>(
                 module,
                 Some(&acc_prev[0].data),
                 acc_next,
                 i + 1,
+                auto_keys,
                 scratch,
             );
         } else {
-            pack_core(
-                module,
-                None,
-                acc_next,
-                i + 1,
-                scratch,
-            );
+            pack_core(module, None, acc_next, i + 1, auto_keys, scratch);
         }
     }
 }
 
-fn combine<D>(
+fn combine<D, DataAK>(
     module: &Module<FFT64>,
     acc: &mut Accumulator,
     b: Option<&GLWECiphertext<D>>,
     i: usize,
+    auto_keys: &HashMap<i64, AutomorphismKey<DataAK, FFT64>>,
     scratch: &mut Scratch,
-) where VecZnx<D>: VecZnxToRef {
+) where
+    VecZnx<D>: VecZnxToRef,
+    MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
+{
+    let log_n = module.log_n();
+    let a: &mut GLWECiphertext<Vec<u8>> = &mut acc.data;
+    let basek: usize = a.basek();
+    let k: usize = a.k();
+    let rank: usize = a.rank();
 
+    let gal_el: i64;
 
+    if i == 0 {
+        gal_el = -1;
+    } else {
+        gal_el = module.galois_element(1 << (i - 1))
+    }
+
+    let mut tmp_a: GLWECiphertext<Vec<u8>> = GLWECiphertext::alloc(module, basek, k, rank);
+    let mut tmp_b: GLWECiphertext<Vec<u8>> = GLWECiphertext::alloc(module, basek, k, rank);
+
+    if acc.value {
+        a.rsh(1, scratch);
+
+        if let Some(b) = b {
+            // tmp_a = b * X^t
+            tmp_a.rotate(module, 1 << (log_n - i - 1), b);
+
+            // tmp_a >>= 1
+            tmp_a.rsh(1, scratch);
+
+            // tmp_b = a - b*X^t
+            tmp_b.sub(module, a, &tmp_a);
+            tmp_b.normalize_inplace(module, scratch);
+
+            // a = a + b * X^t
+            a.add_inplace(module, &tmp_a);
+
+            // tmp_b = phi(a - b * X^t)
+            if let Some(key) = auto_keys.get(&gal_el) {
+                tmp_b.automorphism_inplace(module, key, scratch);
+            } else {
+                panic!("auto_key[{}] not found", gal_el);
+            }
+
+            // a = a + b * X^t + phi(a - b * X^t)
+            a.add_inplace(module, &tmp_b);
+        } else {
+            // tmp_a = phi(a)
+            if let Some(key) = auto_keys.get(&gal_el) {
+                tmp_a.automorphism_inplace(module, key, scratch);
+            } else {
+                panic!("auto_key[{}] not found", gal_el);
+            }
+            // a = a + phi(a)
+            a.add_inplace(module, &tmp_a)
+        }
+    } else {
+        if let Some(b) = b {
+            tmp_b.rotate(module, 1 << (log_n - i - 1), b);
+            tmp_b.rsh(1, scratch);
+
+            if let Some(key) = auto_keys.get(&gal_el) {
+                tmp_a.automorphism::<Vec<u8>, _>(module, &tmp_b, key, scratch);
+            } else {
+                panic!("auto_key[{}] not found", gal_el);
+            }
+
+            // a = (b* X^t - phi(b* X^t))
+            a.sub(module, &tmp_b, &tmp_a);
+            acc.value = true
+        }
+    }
 }

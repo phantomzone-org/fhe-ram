@@ -3,8 +3,8 @@ use core::{
 };
 
 use backend::{
-    FFT64, MatZnxDft, MatZnxDftToMut, MatZnxDftToRef, Module, ScalarZnxAlloc, ScalarZnxDft,
-    ScalarZnxDftToMut, ScalarZnxDftToRef, Scratch, VecZnx, VecZnxToMut, VecZnxToRef, ZnxViewMut,
+    FFT64, MatZnxDft, MatZnxDftToMut, MatZnxDftToRef, Module, ScalarZnxDft, ScalarZnxDftToRef,
+    Scratch, VecZnx, VecZnxToMut, VecZnxToRef, ZnxViewMut,
 };
 use itertools::izip;
 use sampling::source::Source;
@@ -36,7 +36,7 @@ impl Address<Vec<u8>> {
 
 impl<D> Address<D>
 where
-    MatZnxDft<D, FFT64>: MatZnxDftToMut<FFT64> + MatZnxDftToRef<FFT64>,
+    MatZnxDft<D, FFT64>: MatZnxDftToMut<FFT64>,
 {
     pub fn encrypt_sk<DataSk>(
         &mut self,
@@ -67,6 +67,24 @@ where
             );
             remain /= max_n1;
         })
+    }
+}
+
+impl<D> Address<D>
+where
+    MatZnxDft<D, FFT64>: MatZnxDftToRef<FFT64>,
+{
+    pub fn n2(&self) -> usize {
+        self.coordinates.len()
+    }
+
+    pub fn n1(&self, idx: usize) -> usize {
+        assert!(idx < self.coordinates.len());
+        self.coordinates[idx].value.len()
+    }
+
+    pub fn at(&self, i: usize) -> &Coordinate<D> {
+        &self.coordinates[i]
     }
 }
 
@@ -104,7 +122,7 @@ impl<D> Coordinate<D> {
 
 impl<D> Coordinate<D>
 where
-    MatZnxDft<D, FFT64>: MatZnxDftToMut<FFT64> + MatZnxDftToRef<FFT64>,
+    MatZnxDft<D, FFT64>: MatZnxDftToMut<FFT64>,
 {
     pub fn encrypt_sk<DataSk>(
         &mut self,
@@ -162,7 +180,7 @@ where
         a: &GLWECiphertext<DataA>,
         scratch: &mut Scratch,
     ) where
-        VecZnx<DataRes>: VecZnxToMut + VecZnxToRef,
+        VecZnx<DataRes>: VecZnxToMut,
         VecZnx<DataA>: VecZnxToRef,
     {
         self.value.iter().enumerate().for_each(|(i, coordinate)| {
@@ -180,9 +198,9 @@ where
         res: &mut GLWECiphertext<DataRes>,
         scratch: &mut Scratch,
     ) where
-        VecZnx<DataRes>: VecZnxToMut + VecZnxToRef,
+        VecZnx<DataRes>: VecZnxToMut,
     {
-        self.value.iter().enumerate().for_each(|(i, coordinate)| {
+        self.value.iter().for_each(|coordinate| {
             res.external_product_inplace(module, coordinate, scratch);
         });
     }
