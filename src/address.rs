@@ -1,5 +1,9 @@
 use core::{
-    ggsw_ciphertext::GGSWCiphertext, glwe_ciphertext::GLWECiphertext, keys::SecretKeyFourier,
+    automorphism::AutomorphismKey,
+    ggsw_ciphertext::GGSWCiphertext,
+    glwe_ciphertext::GLWECiphertext,
+    keys::SecretKeyFourier,
+    tensor_key::{self, TensorKey},
 };
 
 use backend::{
@@ -11,6 +15,9 @@ use sampling::source::Source;
 
 pub struct Address<D> {
     coordinates: Vec<Coordinate<D>>,
+    k: usize,
+    rank: usize,
+    rows: usize,
     decomp: Decomp,
 }
 
@@ -29,6 +36,9 @@ impl Address<Vec<u8>> {
         });
         Self {
             coordinates: coordinates,
+            k,
+            rank,
+            rows,
             decomp: decomp.clone(),
         }
     }
@@ -74,17 +84,33 @@ impl<D> Address<D>
 where
     MatZnxDft<D, FFT64>: MatZnxDftToRef<FFT64>,
 {
-    pub fn n2(&self) -> usize {
+    pub(crate) fn n2(&self) -> usize {
         self.coordinates.len()
     }
 
-    pub fn n1(&self, idx: usize) -> usize {
+    pub(crate) fn n1(&self, idx: usize) -> usize {
         assert!(idx < self.coordinates.len());
         self.coordinates[idx].value.len()
     }
 
-    pub fn at(&self, i: usize) -> &Coordinate<D> {
+    pub(crate) fn at(&self, i: usize) -> &Coordinate<D> {
         &self.coordinates[i]
+    }
+
+    pub(crate) fn k(&self) -> usize {
+        self.k
+    }
+
+    pub(crate) fn rows(&self) -> usize {
+        self.rows
+    }
+
+    pub(crate) fn rank(&self) -> usize {
+        self.rank
+    }
+
+    pub(crate) fn decomp(&self) -> Decomp {
+        self.decomp.clone()
     }
 }
 
@@ -166,6 +192,26 @@ where
             remain >>= base;
             tot_base += base;
         });
+    }
+
+    pub(crate) fn invert<DataOther, DataAK, DataTK>(
+        &mut self,
+        module: &Module<FFT64>,
+        other: &Coordinate<DataOther>,
+        auto_key: &AutomorphismKey<DataAK, FFT64>,
+        tensor_key: &TensorKey<DataTK, FFT64>,
+        scratch: &mut Scratch,
+    ) where
+        MatZnxDft<DataOther, FFT64>: MatZnxDftToRef<FFT64>,
+        MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
+        MatZnxDft<DataTK, FFT64>: MatZnxDftToRef<FFT64>,
+    {
+        assert!(auto_key.p() == -1);
+        self.value.iter_mut().for_each(|value| {
+            value.automorphism_inplace(module, auto_key, tensor_key, scratch);
+        });
+        self.decomp = other.decomp.clone();
+        self.gap = other.gap;
     }
 }
 
