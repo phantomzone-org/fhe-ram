@@ -123,7 +123,7 @@ impl Ram {
         let k_ct: usize = self.k_ct;
         let rank: usize = self.rank;
 
-        let log_n = module.log_n();
+        let log_n: usize = module.log_n();
 
         let mut packer: StreamPacker = StreamPacker::new(module, basek, k_ct, rank);
         let mut results: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
@@ -142,7 +142,7 @@ impl Ram {
             }
 
             if i < address.n2() - 1 {
-                let mut result_next = Vec::new();
+                let mut result_next: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
 
                 for chunk in res_prev.chunks(module.n()) {
                     for j in 0..module.n() {
