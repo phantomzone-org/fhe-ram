@@ -29,7 +29,7 @@ pub struct Ram {
 }
 
 impl Ram {
-    pub fn new(
+    pub(crate) fn new(
         module: &Module<FFT64>,
         basek: usize,
         k_ct: usize,
@@ -62,7 +62,7 @@ impl Ram {
         }
     }
 
-    pub fn encrypt_sk<DataSk>(
+    pub(crate) fn encrypt_sk<DataSk>(
         &mut self,
         module: &Module<FFT64>,
         sk_dft: &SecretKeyFourier<DataSk, FFT64>,
@@ -101,15 +101,14 @@ impl Ram {
         self.k_pt = k_pt;
     }
 
-    pub fn read<DataAdr, DataAK>(
+    pub(crate) fn read<DataAK>(
         &self,
         module: &Module<FFT64>,
-        address: &Address<DataAdr>,
+        address: &Address,
         auto_keys: &HashMap<i64, AutomorphismKey<DataAK, FFT64>>,
         scratch: &mut Scratch,
     ) -> GLWECiphertext<Vec<u8>>
     where
-        MatZnxDft<DataAdr, FFT64>: MatZnxDftToRef<FFT64>,
         MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
     {
         assert!(
@@ -133,7 +132,7 @@ impl Ram {
         let mut tmp_ct: GLWECiphertext<Vec<u8>> = GLWECiphertext::alloc(module, basek, k_ct, rank);
 
         for i in 0..address.n2() {
-            let coordinate: &Coordinate<DataAdr> = address.at(i);
+            let coordinate: &Coordinate<Vec<u8>> = address.at(i);
 
             let res_prev: &Vec<GLWECiphertext<Vec<u8>>>;
 
@@ -180,15 +179,14 @@ impl Ram {
         tmp_ct
     }
 
-    fn read_prepare_write<DataAdr, DataAK>(
+    pub(crate) fn read_prepare_write<DataAdr, DataAK>(
         &mut self,
         module: &Module<FFT64>,
-        address: &Address<DataAdr>,
+        address: &Address,
         auto_keys: &HashMap<i64, AutomorphismKey<DataAK, FFT64>>,
         scratch: &mut Scratch,
     ) -> GLWECiphertext<Vec<u8>>
     where
-        MatZnxDft<DataAdr, FFT64>: MatZnxDftToRef<FFT64>,
         MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
     {
         assert!(
@@ -207,7 +205,7 @@ impl Ram {
         let mut packer: StreamPacker = StreamPacker::new(module, basek, k_ct, rank);
 
         for i in 0..address.n2() {
-            let coordinate: &Coordinate<DataAdr> = address.at(i);
+            let coordinate: &Coordinate<Vec<u8>> = address.at(i);
 
             let res_prev: &mut Vec<GLWECiphertext<Vec<u8>>>;
 
@@ -272,17 +270,16 @@ impl Ram {
         res
     }
 
-    pub fn write<DataW, DataAdr, DataAK, DataTK>(
+    pub(crate) fn write<DataW, DataAK, DataTK>(
         &mut self,
         module: &Module<FFT64>,
         w: &GLWECiphertext<DataW>, // Must encrypt [w, 0, 0, ..., 0];
-        address: &Address<DataAdr>,
+        address: &Address,
         auto_keys: &HashMap<i64, AutomorphismKey<DataAK, FFT64>>,
         tensor_key: &TensorKey<DataTK, FFT64>,
         scratch: &mut Scratch,
     ) where
         VecZnx<DataW>: VecZnxToRef,
-        MatZnxDft<DataAdr, FFT64>: MatZnxDftToRef<FFT64>,
         MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
         MatZnxDft<DataTK, FFT64>: MatZnxDftToRef<FFT64>,
     {
@@ -317,7 +314,7 @@ impl Ram {
 
         for i in (0..address.n2() - 1).rev() {
             // Index polynomial X^{i}
-            let coordinate: &Coordinate<DataAdr> = address.at(i + 1);
+            let coordinate: &Coordinate<Vec<u8>> = address.at(i + 1);
 
             // Inverts coordinate: X^{i} -> X^{-i}
             coordinate_inv.invert(
@@ -345,48 +342,47 @@ impl Ram {
                 .chunks_mut(module.n())
                 .enumerate()
                 .for_each(|(j, chunk)| {
-                // Retrieve the associated polynomial to extract and pack related to the current chunk
-                let poly_lo: &mut GLWECiphertext<Vec<u8>> = &mut result_lo[j];
+                    // Retrieve the associated polynomial to extract and pack related to the current chunk
+                    let poly_lo: &mut GLWECiphertext<Vec<u8>> = &mut result_lo[j];
 
-                coordinate_inv.product_inplace(module, poly_lo, scratch);
+                    coordinate_inv.product_inplace(module, poly_lo, scratch);
 
-                chunk.iter_mut().for_each(|poly_hi| {
+                    chunk.iter_mut().for_each(|poly_hi| {
+                        // Extract the first coefficient poly_lo
+                        // tmp_a = TRACE([a, b, c, d]) -> [a, 0, 0, 0]
+                        let (tmp_a_data, scratch_1) = scratch.tmp_vec_znx(module, rank + 1, size);
+                        let mut tmp_a: GLWECiphertext<&mut [u8]> = GLWECiphertext {
+                            data: tmp_a_data,
+                            k: k_ct,
+                            basek: basek,
+                        };
+                        tmp_a.trace::<Vec<u8>, _>(module, 0, log_n, poly_lo, auto_keys, scratch_1);
 
-                    // Extract the first coefficient poly_lo
-                    // tmp_a = TRACE([a, b, c, d]) -> [a, 0, 0, 0]
-                    let (tmp_a_data, scratch_1) = scratch.tmp_vec_znx(module, rank + 1, size);
-                    let mut tmp_a: GLWECiphertext<&mut [u8]> = GLWECiphertext {
-                        data: tmp_a_data,
-                        k: k_ct,
-                        basek: basek,
-                    };
-                    tmp_a.trace::<Vec<u8>, _>(module, 0, log_n, poly_lo, auto_keys, scratch_1);
+                        // Zeroes the first coefficient of poly_hi
+                        // poly_hi = [a, b, c, d] - TRACE([a, b, c, d]) = [0, b, c, d]
+                        let (tmp_b_data, scratch_2) = scratch_1.tmp_vec_znx(module, rank + 1, size);
+                        let mut tmp_b: GLWECiphertext<&mut [u8]> = GLWECiphertext {
+                            data: tmp_b_data,
+                            k: k_ct,
+                            basek: basek,
+                        };
+                        tmp_b.trace::<Vec<u8>, _>(module, 0, log_n, poly_hi, auto_keys, scratch_2);
+                        poly_hi.sub_inplace_ab(module, &tmp_b);
 
-                    // Zeroes the first coefficient of poly_hi
-                    // poly_hi = [a, b, c, d] - TRACE([a, b, c, d]) = [0, b, c, d]
-                    let (tmp_b_data, scratch_2) = scratch_1.tmp_vec_znx(module, rank + 1, size);
-                    let mut tmp_b: GLWECiphertext<&mut [u8]> = GLWECiphertext {
-                        data: tmp_b_data,
-                        k: k_ct,
-                        basek: basek,
-                    };
-                    tmp_b.trace::<Vec<u8>, _>(module, 0, log_n, poly_hi, auto_keys, scratch_2);
-                    poly_hi.sub_inplace_ab(module, &tmp_b);
+                        // Adds extracted coefficient of poly_lo on poly_hi
+                        // [a, 0, 0, 0] + [0, b, c, d]
+                        poly_hi.add_inplace(module, &tmp_a);
+                        poly_hi.normalize_inplace(module, scratch_2);
 
-                    // Adds extracted coefficient of poly_lo on poly_hi
-                    // [a, 0, 0, 0] + [0, b, c, d]
-                    poly_hi.add_inplace(module, &tmp_a);
-                    poly_hi.normalize_inplace(module, scratch_2);
-
-                    // Cyclic shift poly_lo by X^-1
-                    poly_hi.rotate_inplace(module, -1);
-                })
-            });
+                        // Cyclic shift poly_lo by X^-1
+                        poly_hi.rotate_inplace(module, -1);
+                    })
+                });
         }
 
         // Apply the last reverse shift to the top of the tree.
-        self.data.iter_mut().for_each(|poly_lo|{
-            let coordinate: &Coordinate<DataAdr> = address.at(0);
+        self.data.iter_mut().for_each(|poly_lo| {
+            let coordinate: &Coordinate<Vec<u8>> = address.at(0);
 
             // Inverts coordinate: X^{i} -> X^{-i}
             coordinate_inv.invert(

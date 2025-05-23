@@ -1,6 +1,10 @@
 pub mod address;
-pub(crate) mod packing;
+pub mod client;
+pub mod parameters;
 pub mod ram;
+pub mod server;
+
+pub(crate) mod packing;
 
 #[cfg(test)]
 mod test_fft64;

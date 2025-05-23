@@ -1,11 +1,8 @@
-use core::{
-    automorphism::AutomorphismKey, elem::Infos, glwe_ciphertext::GLWECiphertext,
-    glwe_plaintext::GLWEPlaintext, keys::SecretKeyFourier,
-};
+use core::{automorphism::AutomorphismKey, elem::Infos, glwe_ciphertext::GLWECiphertext};
 use std::collections::HashMap;
 
 use backend::{
-    FFT64, MatZnxDft, MatZnxDftToRef, Module, Scratch, VecZnx, VecZnxAlloc, VecZnxOps, VecZnxToRef,
+    FFT64, MatZnxDft, MatZnxDftToRef, Module, Scratch, VecZnx, VecZnxAlloc, VecZnxToRef,
 };
 
 pub(crate) struct StreamPacker {

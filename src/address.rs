@@ -1,9 +1,6 @@
 use core::{
-    automorphism::AutomorphismKey,
-    ggsw_ciphertext::GGSWCiphertext,
-    glwe_ciphertext::GLWECiphertext,
-    keys::SecretKeyFourier,
-    tensor_key::{self, TensorKey},
+    automorphism::AutomorphismKey, ggsw_ciphertext::GGSWCiphertext,
+    glwe_ciphertext::GLWECiphertext, keys::SecretKeyFourier, tensor_key::TensorKey,
 };
 
 use backend::{
@@ -13,18 +10,18 @@ use backend::{
 use itertools::izip;
 use sampling::source::Source;
 
-pub struct Address<D> {
-    coordinates: Vec<Coordinate<D>>,
+pub struct Address {
+    coordinates: Vec<Coordinate<Vec<u8>>>,
     k: usize,
     rank: usize,
     rows: usize,
-    decomp: Decomp,
+    base2d: Base2D,
 }
 
-impl Address<Vec<u8>> {
-    pub fn new(
+impl Address {
+    pub(crate) fn new(
         module: &Module<FFT64>,
-        decomp: &Decomp,
+        base2d: &Base2D,
         basek: usize,
         k: usize,
         rows: usize,
@@ -39,16 +36,11 @@ impl Address<Vec<u8>> {
             k,
             rank,
             rows,
-            decomp: decomp.clone(),
+            base2d: base2d.clone(),
         }
     }
-}
 
-impl<D> Address<D>
-where
-    MatZnxDft<D, FFT64>: MatZnxDftToMut<FFT64>,
-{
-    pub fn encrypt_sk<DataSk>(
+    pub(crate) fn encrypt_sk<DataSk>(
         &mut self,
         idx: u32,
         module: &Module<FFT64>,
@@ -78,12 +70,7 @@ where
             remain /= max_n1;
         })
     }
-}
 
-impl<D> Address<D>
-where
-    MatZnxDft<D, FFT64>: MatZnxDftToRef<FFT64>,
-{
     pub(crate) fn n2(&self) -> usize {
         self.coordinates.len()
     }
@@ -93,7 +80,7 @@ where
         self.coordinates[idx].value.len()
     }
 
-    pub(crate) fn at(&self, i: usize) -> &Coordinate<D> {
+    pub(crate) fn at(&self, i: usize) -> &Coordinate<Vec<u8>> {
         &self.coordinates[i]
     }
 
@@ -121,7 +108,7 @@ pub(crate) struct Coordinate<D> {
 }
 
 impl Coordinate<Vec<u8>> {
-    pub fn alloc(
+    pub(crate) fn alloc(
         module: &Module<FFT64>,
         basek: usize,
         k: usize,
@@ -141,7 +128,7 @@ impl Coordinate<Vec<u8>> {
 }
 
 impl<D> Coordinate<D> {
-    pub fn n2(&self) -> usize {
+    pub(crate) fn n2(&self) -> usize {
         self.value.len()
     }
 }
@@ -150,7 +137,7 @@ impl<D> Coordinate<D>
 where
     MatZnxDft<D, FFT64>: MatZnxDftToMut<FFT64>,
 {
-    pub fn encrypt_sk<DataSk>(
+    pub(crate) fn encrypt_sk<DataSk>(
         &mut self,
         value: i64,
         module: &Module<FFT64>,
@@ -219,7 +206,7 @@ impl<D> Coordinate<D>
 where
     MatZnxDft<D, FFT64>: MatZnxDftToRef<FFT64>,
 {
-    pub fn product<DataRes, DataA>(
+    pub(crate) fn product<DataRes, DataA>(
         &self,
         module: &Module<FFT64>,
         res: &mut GLWECiphertext<DataRes>,
@@ -238,7 +225,7 @@ where
         });
     }
 
-    pub fn product_inplace<DataRes>(
+    pub(crate) fn product_inplace<DataRes>(
         &self,
         module: &Module<FFT64>,
         res: &mut GLWECiphertext<DataRes>,
@@ -253,28 +240,28 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct Decomp {
+pub(crate) struct Decomp {
     pub n1: usize,
     pub n2: usize,
     pub base: Vec<u8>,
 }
 
 impl Decomp {
-    pub fn n1(&self) -> usize {
+    pub(crate) fn n1(&self) -> usize {
         self.n1
     }
 
-    pub fn n2(&self) -> usize {
+    pub(crate) fn n2(&self) -> usize {
         self.n2
     }
 
-    pub fn max_n1(&self) -> usize {
+    pub(crate) fn max_n1(&self) -> usize {
         let mut max: usize = 1;
         self.base.iter().for_each(|i| max <<= i);
         max
     }
 
-    pub fn max(&self) -> usize {
+    pub(crate) fn max(&self) -> usize {
         let max_n1: usize = self.max_n1();
         let mut max: usize = 1;
         for _ in 0..self.n2() {
@@ -283,13 +270,13 @@ impl Decomp {
         max
     }
 
-    pub fn gap(&self, log_n: usize) -> usize {
+    pub(crate) fn gap(&self, log_n: usize) -> usize {
         let mut gap: usize = log_n;
         self.base.iter().for_each(|i| gap >>= i);
         1 << gap
     }
 
-    pub fn basis_1d(&self) -> Vec<u8> {
+    pub(crate) fn basis_1d(&self) -> Vec<u8> {
         let n1: usize = self.n1();
         let n2: usize = self.n2();
         let mut decomp: Vec<u8> = vec![0u8; n1 * n2];
@@ -299,11 +286,96 @@ impl Decomp {
         decomp
     }
 
-    pub fn basis_2d(&self) -> Vec<Vec<u8>> {
+    pub(crate) fn basis_2d(&self) -> Vec<Vec<u8>> {
         let mut decomp: Vec<Vec<u8>> = Vec::new();
         for _ in 0..self.n1() {
             decomp.push(self.base.clone());
         }
         decomp
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Base1D(pub Vec<u8>);
+
+impl Base1D {
+    pub fn max(&self) -> usize {
+        let mut max: usize = 1;
+        self.0.iter().for_each(|i| max <<= i);
+        max
+    }
+
+    pub fn gap(&self, log_n: usize) -> usize {
+        let mut gap: usize = log_n;
+        self.0.iter().for_each(|i| gap >>= i);
+        1 << gap
+    }
+
+    pub fn decomp(&self, value: u32) -> Vec<u8> {
+        let mut decomp: Vec<u8> = Vec::new();
+        let mut sum_bases: u8 = 0;
+        self.0.iter().enumerate().for_each(|(i, base)| {
+            decomp.push(((value >> sum_bases) & (1 << base) - 1) as u8);
+            sum_bases += base;
+        });
+        decomp
+    }
+
+    pub fn recomp(&self, decomp: &Vec<u8>) -> u32 {
+        let mut value: u32 = 0;
+        let mut sum_bases: u8 = 0;
+        self.0.iter().enumerate().for_each(|(i, base)| {
+            value |= (decomp[i] << sum_bases) as u32;
+            sum_bases += base;
+        });
+        value
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Base2D(pub Vec<Base1D>);
+
+impl Base2D {
+    pub fn max(&self) -> usize {
+        self.as_1d().max()
+    }
+
+    pub fn as_1d(&self) -> Base1D {
+        Base1D(
+            self.0
+                .iter()
+                .flat_map(|array| array.0.iter().map(|&x| x))
+                .collect(),
+        )
+    }
+
+    pub fn decomp(&self, value: u32) -> Vec<u8> {
+        self.as_1d().decomp(value)
+    }
+
+    pub fn recomp(&self, decomp: &Vec<u8>) -> u32 {
+        self.as_1d().recomp(decomp)
+    }
+}
+
+pub(crate) fn get_base_2d(value: u32, base: Vec<u8>) -> Base2D {
+    let mut out: Vec<Base1D> = Vec::new();
+    let mut value_bit_size: u32 = 32 - (value - 1).leading_zeros();
+
+    'outer: while value_bit_size != 0 {
+        let mut v = Vec::new();
+        for i in 0..base.len() {
+            if base[i] as u32 <= value_bit_size {
+                v.push(base[i]);
+                value_bit_size -= base[i] as u32;
+            } else {
+                v.push(value_bit_size as u8);
+                out.push(Base1D(v));
+                break 'outer;
+            }
+        }
+        out.push(Base1D(v))
+    }
+
+    Base2D(out)
 }
