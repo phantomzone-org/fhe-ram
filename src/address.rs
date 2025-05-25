@@ -28,8 +28,8 @@ impl Address {
         rank: usize,
     ) -> Self {
         let mut coordinates: Vec<Coordinate<Vec<u8>>> = Vec::new();
-        (0..decomp.n1()).for_each(|_| {
-            coordinates.push(Coordinate::alloc(module, basek, k, rows, rank, decomp))
+        base2d.0.iter().for_each(|base1d| {
+            coordinates.push(Coordinate::alloc(module, basek, k, rows, rank, base1d))
         });
         Self {
             coordinates: coordinates,
@@ -52,12 +52,11 @@ impl Address {
     ) where
         ScalarZnxDft<DataSk, FFT64>: ScalarZnxDftToRef<FFT64>,
     {
-        debug_assert!(self.decomp.max() > idx as usize);
-        let max_n1: usize = self.decomp.max_n1();
-        let mask_n1: usize = max_n1 - 1;
+        debug_assert!(self.base2d.max() > idx as usize);
         let mut remain: usize = idx as _;
-        self.coordinates.iter_mut().for_each(|coordinate| {
-            let k: usize = remain & mask_n1;
+        izip!(self.coordinates.iter_mut(), self.base2d.0.iter()).for_each(|(coordinate, base1d)| {
+            let max: usize = base1d.max();
+            let k: usize = remain & (max - 1);
             coordinate.encrypt_sk(
                 -(k as i64),
                 module,
@@ -67,7 +66,7 @@ impl Address {
                 sigma,
                 scratch,
             );
-            remain /= max_n1;
+            remain /= max;
         })
     }
 
@@ -96,15 +95,14 @@ impl Address {
         self.rank
     }
 
-    pub(crate) fn decomp(&self) -> Decomp {
-        self.decomp.clone()
+    pub(crate) fn base2d(&self) -> Base2D {
+        self.base2d.clone()
     }
 }
 
 pub(crate) struct Coordinate<D> {
     pub(crate) value: Vec<GGSWCiphertext<D, FFT64>>,
-    pub(crate) decomp: Vec<u8>,
-    pub(crate) gap: usize,
+    pub(crate) base1d: Base1D,
 }
 
 impl Coordinate<Vec<u8>> {
@@ -114,15 +112,16 @@ impl Coordinate<Vec<u8>> {
         k: usize,
         rows: usize,
         rank: usize,
-        decomp: &Decomp,
+        base1d: &Base1D,
     ) -> Self {
         let mut coordinates: Vec<GGSWCiphertext<Vec<u8>, FFT64>> = Vec::new();
-        (0..decomp.n2())
+        base1d
+            .0
+            .iter()
             .for_each(|_| coordinates.push(GGSWCiphertext::alloc(module, basek, k, rows, rank)));
         Self {
             value: coordinates,
-            decomp: decomp.base.clone(),
-            gap: decomp.gap(module.log_n()),
+            base1d: base1d.clone(),
         }
     }
 }
@@ -152,13 +151,14 @@ where
         let n: usize = module.n();
         let (mut scalar, scratch1) = scratch.tmp_scalar_znx(module, 1);
         let sign: i64 = value.signum();
+        let gap: usize = self.base1d.gap(module.log_n());
 
         let mut remain: usize = value.abs() as usize;
         let mut tot_base: u8 = 0;
-        izip!(self.value.iter_mut(), self.decomp.iter()).for_each(|(coordinate, base)| {
+        izip!(self.value.iter_mut(), self.base1d.0.iter()).for_each(|(coordinate, base)| {
             let mask: usize = (1 << base) - 1;
 
-            let chunk: usize = ((remain & mask) << tot_base) * self.gap;
+            let chunk: usize = ((remain & mask) << tot_base) * gap;
 
             if sign < 0 && chunk != 0 {
                 scalar.raw_mut()[n - chunk] = -1; // (X^i)^-1 = X^{2n-i} = -X^{n-i}
@@ -197,8 +197,7 @@ where
         self.value.iter_mut().for_each(|value| {
             value.automorphism_inplace(module, auto_key, tensor_key, scratch);
         });
-        self.decomp = other.decomp.clone();
-        self.gap = other.gap;
+        self.base1d = other.base1d.clone();
     }
 }
 

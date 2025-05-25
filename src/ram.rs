@@ -309,12 +309,14 @@ impl Ram {
             address.k(),
             address.rows(),
             rank,
-            &address.decomp(),
+            &address.at(0).base1d.clone(),
         );
 
         for i in (0..address.n2() - 1).rev() {
             // Index polynomial X^{i}
             let coordinate: &Coordinate<Vec<u8>> = address.at(i + 1);
+
+            coordinate_inv.base1d = coordinate.base1d.clone();
 
             // Inverts coordinate: X^{i} -> X^{-i}
             coordinate_inv.invert(

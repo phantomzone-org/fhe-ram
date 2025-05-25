@@ -1,8 +1,7 @@
 pub mod address;
-pub mod client;
+pub mod keys;
 pub mod parameters;
 pub mod ram;
-pub mod server;
 
 pub(crate) mod packing;
 
