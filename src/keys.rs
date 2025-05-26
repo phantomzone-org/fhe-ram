@@ -9,20 +9,20 @@ use std::collections::HashMap;
 use backend::{FFT64, Module, ScratchOwned};
 use sampling::source::{Source, new_seed};
 
-use crate::{address::get_base_2d, parameters::Parameters};
+use crate::parameters::Parameters;
 
 pub struct EvaluationKeys {
     pub(crate) auto_keys: HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>>,
     pub(crate) tensor_key: TensorKey<Vec<u8>, FFT64>,
 }
 
-pub fn gen_keys(params: Parameters) -> (SecretKey<Vec<u8>>, EvaluationKeys) {
-    let module: &Module<FFT64> = &params.module;
-    let basek: usize = params.basek;
-    let k_evk: usize = params.k_evk;
-    let size_evk: usize = params.size_evk;
-    let rows: usize = params.rows;
-    let rank: usize = params.rank;
+pub fn gen_keys(params: &Parameters) -> (SecretKey<Vec<u8>>, EvaluationKeys) {
+    let module: &Module<FFT64> = &params.module();
+    let basek: usize = params.basek();
+    let k_evk: usize = params.k_evk();
+    let size_evk: usize = params.size_evk();
+    let rows: usize = params.rows_addr();
+    let rank: usize = params.rank();
 
     let mut source_1: Source = Source::new(new_seed());
     let mut source_2: Source = Source::new(new_seed());
@@ -32,8 +32,8 @@ pub fn gen_keys(params: Parameters) -> (SecretKey<Vec<u8>>, EvaluationKeys) {
             | TensorKey::generate_from_sk_scratch_space(module, rank, size_evk),
     );
 
-    let mut sk: SecretKey<Vec<u8>> = SecretKey::alloc(module, params.rank);
-    sk.fill_ternary_prob(params.xs, &mut source_1);
+    let mut sk: SecretKey<Vec<u8>> = SecretKey::alloc(module, params.rank());
+    sk.fill_ternary_prob(params.xs(), &mut source_1);
 
     let mut sk_dft: SecretKeyFourier<Vec<u8>, FFT64> = SecretKeyFourier::alloc(module, rank);
     sk_dft.dft(module, &sk);
@@ -50,7 +50,7 @@ pub fn gen_keys(params: Parameters) -> (SecretKey<Vec<u8>>, EvaluationKeys) {
             &sk,
             &mut source_1,
             &mut source_2,
-            params.xe,
+            params.xe(),
             scratch.borrow(),
         );
         auto_keys.insert(*gal_el, key);
@@ -62,15 +62,12 @@ pub fn gen_keys(params: Parameters) -> (SecretKey<Vec<u8>>, EvaluationKeys) {
         &sk_dft,
         &mut source_1,
         &mut source_2,
-        params.xe,
+        params.xe(),
         scratch.borrow(),
     );
 
-    (
-        sk,
-        EvaluationKeys {
-            auto_keys,
-            tensor_key,
-        },
-    )
+    (sk, EvaluationKeys {
+        auto_keys,
+        tensor_key,
+    })
 }

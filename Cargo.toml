@@ -7,4 +7,5 @@ edition = "2024"
 core = { path = "../poulpy/core" }
 backend = { path = "../poulpy/backend" }
 sampling = { path = "../poulpy/sampling" }
+rand_core = "0.9.3"
 itertools = "0.14.0"

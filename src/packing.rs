@@ -48,10 +48,10 @@ impl StreamPacker {
     pub(crate) fn add_scratch_space(
         module: &Module<FFT64>,
         ct_size: usize,
-        auto_key_size: usize,
+        autokey_size: usize,
         rank: usize,
     ) -> usize {
-        pack_core_scratch_space(module, ct_size, auto_key_size, rank)
+        pack_core_scratch_space(module, ct_size, autokey_size, rank)
     }
 
     pub(crate) fn add<DataA, DataAK>(
@@ -99,10 +99,10 @@ impl StreamPacker {
 fn pack_core_scratch_space(
     module: &Module<FFT64>,
     ct_size: usize,
-    auto_key_size: usize,
+    autokey_size: usize,
     rank: usize,
 ) -> usize {
-    combine_scratch_space(module, ct_size, auto_key_size, rank)
+    combine_scratch_space(module, ct_size, autokey_size, rank)
 }
 
 fn pack_core<D, DataAK>(
