@@ -1,17 +1,18 @@
 use backend::{FFT64, Module};
 
-const LOG_N: usize = 10;
+const LOG_N: usize = 12;
 const BASEK: usize = 17;
-const RANK: usize = 3;
+const RANK: usize = 1;
 const K_PT: usize = (u8::BITS as usize) + 1;
 const K_CT: usize = BASEK * 3;
 const K_ADDR: usize = BASEK * 4;
 const K_EVK: usize = BASEK * 5;
 const XS: f64 = 0.5;
 const XE: f64 = 3.2;
-pub const DECOMP_N: [u8; 3] = [4, 3, 3];
+pub const DECOMP_N: [u8; 2] = [6, 6];
 
-pub const MAX_ADDR: usize = 65536;
+pub const RAM_CHUNKS: usize = 4;
+pub const MAX_ADDR: usize = 1 << 18;
 
 pub struct Parameters {
     module: Module<FFT64>,
@@ -25,10 +26,13 @@ pub struct Parameters {
     xe: f64,
     max_addr: usize,
     decomp_n: Vec<u8>,
+    ram_chunks: usize,
 }
 
 impl Parameters {
     pub fn new() -> Self {
+        assert!(DECOMP_N.iter().sum::<u8>() == LOG_N as u8);
+
         Self {
             module: Module::<FFT64>::new(1 << LOG_N),
             basek: BASEK,
@@ -41,6 +45,7 @@ impl Parameters {
             xe: XE,
             max_addr: MAX_ADDR,
             decomp_n: DECOMP_N.to_vec(),
+            ram_chunks: RAM_CHUNKS,
         }
     }
 
@@ -78,6 +83,10 @@ impl Parameters {
 
     pub fn size_ct(&self) -> usize {
         (self.k_ct() + self.basek() - 1) / self.basek()
+    }
+
+    pub(crate) fn ram_chunks(&self) -> usize {
+        self.ram_chunks
     }
 
     pub(crate) fn k_evk(&self) -> usize {

@@ -7,6 +7,7 @@ use backend::{
 
 pub(crate) struct StreamPacker {
     accumulators: Vec<Accumulator>,
+    log_batch: usize,
     counter: usize,
 }
 
@@ -27,12 +28,20 @@ impl Accumulator {
 }
 
 impl StreamPacker {
-    pub(crate) fn new(module: &Module<FFT64>, basek: usize, k: usize, rank: usize) -> Self {
+    pub(crate) fn new(
+        module: &Module<FFT64>,
+        log_batch: usize,
+        basek: usize,
+        k: usize,
+        rank: usize,
+    ) -> Self {
         let mut accumulators: Vec<Accumulator> = Vec::<Accumulator>::new();
         let log_n: usize = module.log_n();
-        (0..log_n).for_each(|_| accumulators.push(Accumulator::alloc(module, basek, k, rank)));
+        (0..log_n - log_batch)
+            .for_each(|_| accumulators.push(Accumulator::alloc(module, basek, k, rank)));
         Self {
             accumulators: accumulators,
+            log_batch,
             counter: 0,
         }
     }
@@ -65,10 +74,21 @@ impl StreamPacker {
         VecZnx<DataA>: VecZnxToRef,
         MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
     {
-        pack_core(module, a, &mut self.accumulators, 0, auto_keys, scratch);
-        self.counter += 1;
+        pack_core(
+            module,
+            a,
+            &mut self.accumulators,
+            self.log_batch,
+            auto_keys,
+            scratch,
+        );
+        self.counter += 1 << self.log_batch;
         if self.counter == module.n() {
-            res.push(self.accumulators[module.log_n() - 1].data.clone());
+            res.push(
+                self.accumulators[module.log_n() - self.log_batch - 1]
+                    .data
+                    .clone(),
+            );
             self.reset();
         }
     }
@@ -83,7 +103,7 @@ impl StreamPacker {
         MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
     {
         if self.counter != 0 {
-            while self.counter != module.n() - 1 {
+            while self.counter != 0 {
                 self.add(
                     module,
                     res,
@@ -116,7 +136,7 @@ fn pack_core<D, DataAK>(
     VecZnx<D>: VecZnxToRef,
     MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
 {
-    let log_n = module.log_n();
+    let log_n: usize = module.log_n();
 
     if i == log_n {
         return;

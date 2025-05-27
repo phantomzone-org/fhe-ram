@@ -14,7 +14,7 @@ use crate::{packing::StreamPacker, reverse_bits_msb};
 
 #[test]
 fn packing() {
-    let log_n: usize = 9;
+    let log_n: usize = 5;
     let module: Module<FFT64> = Module::<FFT64>::new(1 << log_n);
 
     let mut source_xs: Source = Source::new([0u8; 32]);
@@ -69,7 +69,9 @@ fn packing() {
         auto_keys.insert(*gal_el, key);
     });
 
-    let mut packer: StreamPacker = StreamPacker::new(&module, basek, k_ct, rank);
+    let log_batch: usize = 0;
+
+    let mut packer: StreamPacker = StreamPacker::new(&module, log_batch, basek, k_ct, rank);
 
     let mut ct: GLWECiphertext<Vec<u8>> = GLWECiphertext::alloc(&module, basek, k_ct, rank);
 
@@ -86,7 +88,8 @@ fn packing() {
     let mut res: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
 
     let start = Instant::now();
-    (0..2 * module.n()).for_each(|i| {
+    (0..module.n() >> log_batch).for_each(|i| {
+        println!("pt {}", pt.data);
         ct.encrypt_sk(
             &module,
             &pt,
@@ -96,7 +99,8 @@ fn packing() {
             sigma,
             scratch.borrow(),
         );
-        module.vec_znx_rotate_inplace(-1, &mut pt, 0); // X^-1 * pt
+        module.vec_znx_rotate_inplace(-(1 << log_batch), &mut pt, 0); // X^-batch * pt
+
         if reverse_bits_msb(i, log_n as u32) % 5 == 0 {
             packer.add(&module, &mut res, Some(&ct), &auto_keys, scratch.borrow());
         } else {
@@ -117,6 +121,8 @@ fn packing() {
 
     let mut pt_want: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(&module, basek, k_ct);
 
+    println!("{}", res.len());
+
     res.iter().enumerate().for_each(|(i, res_i)| {
         let mut data: Vec<i64> = vec![0i64; module.n()];
         data.iter_mut().enumerate().for_each(|(i, x)| {
@@ -128,7 +134,7 @@ fn packing() {
 
         res_i.decrypt(&module, &mut pt, &sk_dft, scratch.borrow());
 
-        //println!("{}", pt.data);
+        println!("{}", pt.data);
 
         if i & 1 == 0 {
             module.vec_znx_sub_ab_inplace(&mut pt, 0, &pt_want, 0);

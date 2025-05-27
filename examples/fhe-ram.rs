@@ -4,6 +4,7 @@ use core::{
     glwe_plaintext::GLWEPlaintext,
     keys::{SecretKey, SecretKeyFourier},
 };
+use std::time::Instant;
 
 use backend::{Decoding, Encoding, FFT64, Module, ScratchOwned};
 use fhe_ram::{address::Address, keys::gen_keys, parameters::Parameters, ram::Ram};
@@ -16,7 +17,9 @@ fn main() {
 
     let mut source: Source = Source::new([0u8; 32]);
 
-    let mut data: Vec<u8> = vec![0u8; params.max_addr()];
+    let chunks: usize = 4;
+
+    let mut data: Vec<u8> = vec![0u8; params.max_addr() * chunks];
     data.iter_mut().for_each(|x| *x = source.next_u32() as u8);
 
     let mut ram: Ram = Ram::new();
@@ -25,48 +28,70 @@ fn main() {
 
     let mut addr: Address = Address::alloc(&params);
 
-    let idx: u32 = 127;
+    let idx: u32 = source.next_u32() % params.max_addr() as u32;
 
     addr.encrypt_sk(&params, idx, &sk);
 
-    let ct: GLWECiphertext<Vec<u8>> = ram.read(&addr, &keys);
-    let want: u8 = data[idx as usize];
-    let noise: f64 = decrypt_glwe(&params, &ct, want, &sk);
-    println!("noise: {}", noise);
-    assert!(
-        noise < -(params.k_pt() as f64 + 1.0),
-        "{} >= {}",
-        noise,
-        (params.k_pt() as f64 + 1.0)
-    );
+    let ct: Vec<GLWECiphertext<Vec<u8>>> = ram.read(&addr, &keys);
+    (0..chunks).for_each(|i| {
+        let want: u8 = data[i + idx as usize];
+        let noise: f64 = decrypt_glwe(&params, &ct[i], want, &sk);
+        println!("noise: {}", noise);
+        assert!(
+            noise < -(params.k_pt() as f64 + 1.0),
+            "{} >= {}",
+            noise,
+            (params.k_pt() as f64 + 1.0)
+        );
+    });
 
-    let ct: GLWECiphertext<Vec<u8>> = ram.read_prepare_write(&addr, &keys);
-    let want: u8 = data[idx as usize];
-    let noise: f64 = decrypt_glwe(&params, &ct, want, &sk);
-    println!("noise: {}", noise);
-    assert!(
-        noise < -(params.k_pt() as f64 + 1.0),
-        "{} >= {}",
-        noise,
-        (params.k_pt() as f64 + 1.0)
-    );
-    let value: u8 = 4;
+    let ct: Vec<GLWECiphertext<Vec<u8>>> = ram.read_prepare_write(&addr, &keys);
 
-    let ct_w: GLWECiphertext<Vec<u8>> = encrypt_glwe(&params, value, &sk);
+    (0..chunks).for_each(|i| {
+        let want: u8 = data[i + idx as usize];
+        let noise: f64 = decrypt_glwe(&params, &ct[i], want, &sk);
+        println!("noise: {}", noise);
+        assert!(
+            noise < -(params.k_pt() as f64 + 1.0),
+            "{} >= {}",
+            noise,
+            (params.k_pt() as f64 + 1.0)
+        );
+    });
 
-    ram.write(&ct_w, &addr, &keys, &sk);
-    data[idx as usize] = value;
+    let mut value: Vec<u8> = vec![0u8; chunks];
+    value.iter_mut().for_each(|x| {
+        *x = source.next_u32() as u8;
+    });
 
-    let ct: GLWECiphertext<Vec<u8>> = ram.read(&addr, &keys);
-    let want: u8 = data[idx as usize];
-    let noise: f64 = decrypt_glwe(&params, &ct, want, &sk);
-    println!("noise: {}", noise);
-    assert!(
-        noise < -(params.k_pt() as f64 + 1.0),
-        "{} >= {}",
-        noise,
-        (params.k_pt() as f64 + 1.0)
-    );
+    let mut ct_w: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
+    (0..chunks).for_each(|i| {
+        ct_w.push(encrypt_glwe(&params, value[i], &sk));
+    });
+
+    let start: Instant = Instant::now();
+    ram.write::<Vec<u8>>(&ct_w, &addr, &keys, &sk);
+    let duration: std::time::Duration = start.elapsed();
+    println!("Elapsed time: {} ms", duration.as_millis());
+
+    // Updates plaintext memory
+    (0..chunks).for_each(|i| {
+        data[i + idx as usize] = value[i];
+    });
+
+    let ct: Vec<GLWECiphertext<Vec<u8>>> = ram.read(&addr, &keys);
+
+    (0..chunks).for_each(|i| {
+        let want: u8 = data[i + idx as usize];
+        let noise: f64 = decrypt_glwe(&params, &ct[i], want, &sk);
+        println!("noise: {}", noise);
+        assert!(
+            noise < -(params.k_pt() as f64 + 1.0),
+            "{} >= {}",
+            noise,
+            (params.k_pt() as f64 + 1.0)
+        );
+    });
 }
 
 fn encrypt_glwe(

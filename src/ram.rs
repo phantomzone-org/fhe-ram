@@ -1,6 +1,5 @@
 use core::{
     automorphism::AutomorphismKey,
-    elem::Infos,
     glwe_ciphertext::GLWECiphertext,
     glwe_plaintext::GLWEPlaintext,
     keys::{SecretKey, SecretKeyFourier},
@@ -8,7 +7,10 @@ use core::{
 };
 use std::collections::HashMap;
 
-use backend::{Encoding, FFT64, Module, Scratch, ScratchOwned, VecZnx, VecZnxAlloc, VecZnxToRef};
+use backend::{
+    Encoding, FFT64, MatZnxDft, MatZnxDftToRef, Module, Scratch, ScratchOwned, VecZnx, VecZnxAlloc,
+    VecZnxToRef,
+};
 use itertools::izip;
 use sampling::source::{Source, new_seed};
 
@@ -22,42 +24,23 @@ use crate::{
 
 pub struct Ram {
     pub(crate) params: Parameters,
-    pub(crate) data: Vec<GLWECiphertext<Vec<u8>>>,
-    pub(crate) tree: Vec<Vec<GLWECiphertext<Vec<u8>>>>,
-    pub(crate) state: bool,
+    pub(crate) subrams: Vec<SubRam>,
     pub(crate) scratch: ScratchOwned,
 }
 
 impl Ram {
     pub fn new() -> Self {
         let params: Parameters = Parameters::new();
-        let module: &Module<FFT64> = &params.module();
-        let basek: usize = params.basek();
-        let k_ct: usize = params.k_ct();
-        let rank: usize = params.rank();
-
-        let n: usize = module.n();
-        let mut tree: Vec<Vec<GLWECiphertext<Vec<u8>>>> = Vec::new();
-        let max_addr: usize = params.max_addr();
-
-        if max_addr > n {
-            let mut size: usize = (max_addr + n - 1) / n;
-
-            while size != 1 {
-                size = (size + n - 1) / n;
-                let mut tmp: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
-                (0..size).for_each(|_| tmp.push(GLWECiphertext::alloc(module, basek, k_ct, rank)));
-                tree.push(tmp);
-            }
-        }
-
         let scratch: ScratchOwned = ScratchOwned::new(Self::scratch_bytes(&params));
 
+        let mut subrams: Vec<SubRam> = Vec::new();
+        (0..params.ram_chunks()).for_each(|_| {
+            subrams.push(SubRam::alloc(&params));
+        });
+
         Self {
-            data: Vec::new(),
-            params: params,
-            tree: tree,
-            state: false,
+            subrams,
+            params,
             scratch,
         }
     }
@@ -88,33 +71,226 @@ impl Ram {
     }
 
     pub fn encrypt_sk(&mut self, data: &[u8], sk: &SecretKey<Vec<u8>>) {
-        let max_addr: usize = self.params.max_addr();
+        let params: &Parameters = &self.params;
+        let max_addr: usize = params.max_addr();
+        let ram_chunks: usize = params.ram_chunks();
 
         assert!(
-            data.len() <= max_addr,
-            "invalid data: data.len()={} > max_addr={}",
-            data.len(),
+            data.len() % ram_chunks == 0,
+            "invalid data: data.len()%ram_chunks={} != 0",
+            data.len() % ram_chunks,
+        );
+
+        assert!(
+            data.len() / ram_chunks == max_addr,
+            "invalid data: data.len()/ram_chunks={} != max_addr={}",
+            data.len() / ram_chunks,
             max_addr
         );
 
-        let params: &Parameters = &self.params;
         let module: &Module<FFT64> = &params.module();
-        let k_pt: usize = params.k_pt();
-        let sigma: f64 = params.xe();
         let scratch: &mut Scratch = self.scratch.borrow();
         let rank: usize = params.rank();
-        let basek: usize = params.basek();
-        let k_ct: usize = params.k_ct();
 
         let mut sk_dft: SecretKeyFourier<Vec<u8>, FFT64> = SecretKeyFourier::alloc(module, rank);
         sk_dft.dft(module, sk);
 
+        let mut data_split: Vec<u8> = vec![0u8; max_addr];
+        (0..ram_chunks).for_each(|i| {
+            data_split.iter_mut().enumerate().for_each(|(j, x)| {
+                *x = data[j + i];
+            });
+            self.subrams[i].encrypt_sk(params, &data_split, &sk_dft, scratch);
+        });
+    }
+
+    pub fn read(
+        &mut self,
+        address: &Address,
+        keys: &EvaluationKeys,
+    ) -> Vec<GLWECiphertext<Vec<u8>>> {
+        assert!(
+            self.subrams.len() != 0,
+            "unitialized memory: self.data.len()=0"
+        );
+
+        let mut res: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
+        self.subrams.iter_mut().for_each(|subram| {
+            res.push(subram.read(
+                &self.params,
+                address,
+                &keys.auto_keys,
+                self.scratch.borrow(),
+            ))
+        });
+
+        res
+    }
+
+    pub fn read_prepare_write(
+        &mut self,
+        address: &Address,
+        keys: &EvaluationKeys,
+    ) -> Vec<GLWECiphertext<Vec<u8>>> {
+        assert!(
+            self.subrams.len() != 0,
+            "unitialized memory: self.data.len()=0"
+        );
+
+        let mut res: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
+        self.subrams.iter_mut().for_each(|subram| {
+            res.push(subram.read_prepare_write(
+                &self.params,
+                address,
+                &keys.auto_keys,
+                self.scratch.borrow(),
+            ))
+        });
+
+        res
+    }
+
+    pub fn write<DataW>(
+        &mut self,
+        w: &Vec<GLWECiphertext<DataW>>, // Must encrypt [w, 0, 0, ..., 0];
+        address: &Address,
+        keys: &EvaluationKeys,
+        sk: &SecretKey<Vec<u8>>,
+    ) where
+        VecZnx<DataW>: VecZnxToRef,
+        DataW: std::convert::AsRef<[u8]>, // TODO FIX THIS
+    {
+        assert!(w.len() == self.subrams.len());
+
+        let params: &Parameters = &self.params;
+        let module: &Module<FFT64> = &params.module();
+        let basek: usize = params.basek();
+        let rank: usize = params.rank();
+
+        let scratch: &mut Scratch = self.scratch.borrow();
+        let auto_keys: &HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>> = &keys.auto_keys;
+        let tensor_key: &TensorKey<Vec<u8>, FFT64> = &keys.tensor_key;
+
+        let mut sk_dft: SecretKeyFourier<Vec<u8>, FFT64> = SecretKeyFourier::alloc(module, rank);
+        sk_dft.dft(module, sk);
+
+        // Overwrites the coefficient that was read: to_write_on = to_write_on - TRACE(to_write_on) + w
+        self.subrams.iter_mut().enumerate().for_each(|(i, subram)| {
+            subram.write_first_step(params, &w[i], address.n2(), auto_keys, scratch);
+        });
+
+        for i in (0..address.n2() - 1).rev() {
+            // Index polynomial X^{i}
+            let coordinate: &Coordinate<Vec<u8>> = address.at(i + 1);
+
+            let mut inv_coordinate: Coordinate<Vec<u8>> = Coordinate::alloc(
+                module,
+                basek,
+                address.k(),
+                address.rows(),
+                rank,
+                &coordinate.base1d.clone(),
+            ); // DODO ALLOC FROM SCRATCH SPACE
+
+            inv_coordinate.base1d = coordinate.base1d.clone();
+
+            // Inverts coordinate: X^{i} -> X^{-i}
+            inv_coordinate.invert(
+                module,
+                coordinate,
+                auto_keys.get(&-1).unwrap(),
+                tensor_key,
+                scratch,
+                sk,
+            );
+
+            self.subrams.iter_mut().for_each(|subram| {
+                subram.write_mid_step(i, params, &inv_coordinate, auto_keys, scratch);
+            });
+        }
+
+        let coordinate: &Coordinate<Vec<u8>> = address.at(0);
+
+        let mut inv_coordinate: Coordinate<Vec<u8>> = Coordinate::alloc(
+            module,
+            basek,
+            address.k(),
+            address.rows(),
+            rank,
+            &coordinate.base1d.clone(),
+        ); // DODO ALLOC FROM SCRATCH SPACE
+
+        // Inverts coordinate: X^{i} -> X^{-i}
+        inv_coordinate.invert(
+            module,
+            coordinate,
+            auto_keys.get(&-1).unwrap(),
+            tensor_key,
+            scratch,
+            sk,
+        );
+
+        self.subrams.iter_mut().for_each(|subram| {
+            subram.write_last_step(module, &inv_coordinate, scratch);
+        })
+    }
+}
+
+pub(crate) struct SubRam {
+    data: Vec<GLWECiphertext<Vec<u8>>>,
+    tree: Vec<Vec<GLWECiphertext<Vec<u8>>>>,
+    packer: StreamPacker,
+    state: bool,
+}
+
+impl SubRam {
+    pub fn alloc(params: &Parameters) -> Self {
+        let module: &Module<FFT64> = &params.module();
+        let basek: usize = params.basek();
+        let k_ct: usize = params.k_ct();
+        let rank: usize = params.rank();
+
+        let n: usize = module.n();
+        let mut tree: Vec<Vec<GLWECiphertext<Vec<u8>>>> = Vec::new();
+        let max_addr_split: usize = params.max_addr() >> 2; // u8 -> u32
+
+        if max_addr_split > n {
+            let mut size: usize = (max_addr_split + n - 1) / n;
+            while size != 1 {
+                size = (size + n - 1) / n;
+                let mut tmp: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
+                (0..size).for_each(|_| tmp.push(GLWECiphertext::alloc(module, basek, k_ct, rank)));
+                tree.push(tmp);
+            }
+        }
+
+        Self {
+            data: Vec::new(),
+            tree: tree,
+            packer: StreamPacker::new(module, 0, basek, k_ct, rank),
+            state: false,
+        }
+    }
+
+    pub fn encrypt_sk(
+        &mut self,
+        params: &Parameters,
+        data: &[u8],
+        sk_dft: &SecretKeyFourier<Vec<u8>, FFT64>,
+        scratch: &mut Scratch,
+    ) {
+        let module: &Module<FFT64> = &params.module();
+        let k_pt: usize = params.k_pt();
+        let sigma: f64 = params.xe();
+        let rank: usize = params.rank();
+        let basek: usize = params.basek();
+        let k_ct: usize = params.k_ct();
+
         let mut source_xa: Source = Source::new(new_seed());
         let mut source_xe: Source = Source::new(new_seed());
 
+        let cts: &mut Vec<GLWECiphertext<Vec<u8>>> = &mut self.data;
         let mut pt: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(module, basek, k_pt);
-        let mut cts: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
-
         let mut data_i64: Vec<i64> = vec![0i64; module.n()];
 
         for chunk in data.chunks(module.n()) {
@@ -133,33 +309,28 @@ impl Ram {
             );
             cts.push(ct);
         }
-
-        self.data = cts;
     }
 
-    pub fn read(&mut self, address: &Address, keys: &EvaluationKeys) -> GLWECiphertext<Vec<u8>> {
-        assert!(
-            self.data.len() != 0,
-            "unitialized memory: self.data.len()=0"
-        );
+    fn read(
+        &mut self,
+        params: &Parameters,
+        address: &Address,
+        auto_keys: &HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>>,
+        scratch: &mut Scratch,
+    ) -> GLWECiphertext<Vec<u8>> {
         assert_eq!(
             self.state, false,
             "invalid call to Memory.read: internal state is true -> requires calling Memory.write"
         );
 
-        let params: &Parameters = &self.params;
         let module: &Module<FFT64> = &params.module();
+        let log_n: usize = module.log_n();
         let basek: usize = params.basek();
         let k_ct: usize = params.k_ct();
         let rank: usize = params.rank();
-        let scratch: &mut Scratch = self.scratch.borrow();
-        let auto_keys: &HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>> = &keys.auto_keys;
+        let packer: &mut StreamPacker = &mut self.packer;
 
-        let log_n: usize = module.log_n();
-
-        let mut packer: StreamPacker = StreamPacker::new(module, basek, k_ct, rank);
         let mut results: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
-
         let mut tmp_ct: GLWECiphertext<Vec<u8>> = GLWECiphertext::alloc(module, basek, k_ct, rank);
 
         for i in 0..address.n2() {
@@ -177,7 +348,7 @@ impl Ram {
                 let mut result_next: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
 
                 for chunk in res_prev.chunks(module.n()) {
-                    for j in 0..module.n() {
+                    (0..module.n()).for_each(|j| {
                         let j_rev = reverse_bits_msb(j, log_n as u32);
 
                         if j_rev < chunk.len() {
@@ -192,7 +363,7 @@ impl Ram {
                                 scratch,
                             );
                         }
-                    }
+                    });
                 }
 
                 packer.flush(module, &mut result_next, auto_keys, scratch);
@@ -206,35 +377,28 @@ impl Ram {
                 }
             }
         }
-
-        tmp_ct.trace_inplace(module, 0, module.log_n(), auto_keys, scratch);
+        tmp_ct.trace_inplace(module, 0, log_n, auto_keys, scratch);
         tmp_ct
     }
 
-    pub fn read_prepare_write(
+    fn read_prepare_write(
         &mut self,
+        params: &Parameters,
         address: &Address,
-        keys: &EvaluationKeys,
+        auto_keys: &HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>>,
+        scratch: &mut Scratch,
     ) -> GLWECiphertext<Vec<u8>> {
-        assert!(
-            self.data.len() != 0,
-            "unitialized memory: self.data.len()=0"
-        );
         assert_eq!(
             self.state, false,
             "invalid call to Memory.read: internal state is true -> requires calling Memory.write_after_read"
         );
 
-        let params: &Parameters = &self.params;
         let module: &Module<FFT64> = &params.module();
         let log_n: usize = module.log_n();
         let basek: usize = params.basek();
         let k_ct: usize = params.k_ct();
         let rank: usize = params.rank();
-        let scratch: &mut Scratch = self.scratch.borrow();
-        let auto_keys: &HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>> = &keys.auto_keys;
-
-        let mut packer: StreamPacker = StreamPacker::new(module, basek, k_ct, rank);
+        let packer: &mut StreamPacker = &mut self.packer;
 
         for i in 0..address.n2() {
             let coordinate: &Coordinate<Vec<u8>> = address.at(i);
@@ -293,7 +457,7 @@ impl Ram {
 
         self.state = true;
         if address.n2() != 1 {
-            res.copy(module, &self.tree.last().unwrap()[0])
+            res.copy(module, &self.tree.last().unwrap()[0]);
         } else {
             res.copy(module, &self.data[0]);
         }
@@ -302,42 +466,34 @@ impl Ram {
         res
     }
 
-    pub fn write<DataW>(
+    fn write_first_step<DataW>(
         &mut self,
-        w: &GLWECiphertext<DataW>, // Must encrypt [w, 0, 0, ..., 0];
-        address: &Address,
-        keys: &EvaluationKeys,
-        sk: &SecretKey<Vec<u8>>,
+        params: &Parameters,
+        w: &GLWECiphertext<DataW>,
+        n2: usize,
+        auto_keys: &HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>>,
+        scratch: &mut Scratch,
     ) where
         VecZnx<DataW>: VecZnxToRef,
-        DataW: std::convert::AsRef<[u8]>, // TODO FIX THIS
     {
         assert_eq!(
             self.state, true,
             "invalid call to Memory.read: internal state is true -> requires calling Memory.write_after_read"
         );
 
-        let params: &Parameters = &self.params;
-        let module: &Module<FFT64> = &params.module();
+        let module: &Module<FFT64> = params.module();
         let log_n: usize = module.log_n();
-        let basek: usize = params.basek();
-        let k_ct: usize = params.k_ct();
         let rank: usize = params.rank();
-        let size: usize = self.data[0].size();
-        let scratch: &mut Scratch = self.scratch.borrow();
-        let auto_keys: &HashMap<i64, AutomorphismKey<_, FFT64>> = &keys.auto_keys;
-        let tensor_key: &TensorKey<_, FFT64> = &keys.tensor_key;
+        let k_ct: usize = params.k_ct();
+        let basek: usize = params.basek();
+        let size: usize = params.size_ct();
 
-        let mut sk_dft: SecretKeyFourier<Vec<u8>, FFT64> = SecretKeyFourier::alloc(module, rank);
-        sk_dft.dft(module, sk);
-
-        // Overwrites the coefficient that was read: to_write_on = to_write_on - TRACE(to_write_on) + w
         let to_write_on: &mut GLWECiphertext<Vec<u8>>;
 
-        if address.n2() != 1 {
-            to_write_on = &mut self.tree.last_mut().unwrap()[0];
+        if n2 != 1 {
+            to_write_on = &mut self.tree.last_mut().unwrap()[0]
         } else {
-            to_write_on = &mut self.data[0]
+            to_write_on = &mut self.data[0];
         }
 
         let (tmp_a_data, scratch_1) = scratch.tmp_vec_znx(module, rank + 1, size);
@@ -350,114 +506,93 @@ impl Ram {
         to_write_on.sub_inplace_ab(module, &tmp_a);
         to_write_on.add_inplace(module, w);
         to_write_on.normalize_inplace(module, scratch);
+    }
 
-        for i in (0..address.n2() - 1).rev() {
-            // Index polynomial X^{i}
-            let coordinate: &Coordinate<Vec<u8>> = address.at(i + 1);
+    fn write_mid_step<DataCoordinate>(
+        &mut self,
+        step: usize,
+        params: &Parameters,
+        inv_coordinate: &Coordinate<DataCoordinate>,
+        auto_keys: &HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>>,
+        scratch: &mut Scratch,
+    ) where
+        MatZnxDft<DataCoordinate, FFT64>: MatZnxDftToRef<FFT64>,
+    {
+        let module: &Module<FFT64> = params.module();
+        let log_n: usize = module.log_n();
+        let basek: usize = params.basek();
+        let k_ct: usize = params.k_ct();
+        let rank: usize = params.rank();
+        let size: usize = params.size_ct();
 
-            let mut coordinate_inv: Coordinate<Vec<u8>> = Coordinate::alloc(
-                module,
-                basek,
-                address.k(),
-                address.rows(),
-                rank,
-                &coordinate.base1d.clone(),
-            ); // DODO ALLOC FROM SCRATCH SPACE
+        let tree_hi: &mut Vec<GLWECiphertext<Vec<u8>>>; // Above level
+        let tree_lo: &mut Vec<GLWECiphertext<Vec<u8>>>; // Current level
 
-            coordinate_inv.base1d = coordinate.base1d.clone();
-
-            // Inverts coordinate: X^{i} -> X^{-i}
-            coordinate_inv.invert(
-                module,
-                coordinate,
-                auto_keys.get(&-1).unwrap(),
-                tensor_key,
-                scratch,
-                sk,
-            );
-
-            let result_hi: &mut Vec<GLWECiphertext<Vec<u8>>>; // Above level
-            let result_lo: &mut Vec<GLWECiphertext<Vec<u8>>>; // Current level
-
-            // Top of the tree is not stored in results.
-            if i == 0 {
-                result_hi = &mut self.data;
-                result_lo = &mut self.tree[0];
-            } else {
-                let (left, right) = self.tree.split_at_mut(i);
-                result_hi = &mut left[left.len() - 1];
-                result_lo = &mut right[0];
-            }
-
-            result_hi
-                .chunks_mut(module.n())
-                .enumerate()
-                .for_each(|(j, chunk)| {
-                    // Retrieve the associated polynomial to extract and pack related to the current chunk
-                    let ct_lo: &mut GLWECiphertext<Vec<u8>> = &mut result_lo[j];
-
-                    coordinate_inv.product_inplace(module, ct_lo, scratch);
-
-                    chunk.iter_mut().for_each(|ct_hi| {
-                        // Extract the first coefficient ct_lo
-                        // tmp_a = TRACE([a, b, c, d]) -> [a, 0, 0, 0]
-                        let (tmp_a_data, scratch_1) = scratch.tmp_vec_znx(module, rank + 1, size);
-                        let mut tmp_a: GLWECiphertext<&mut [u8]> = GLWECiphertext {
-                            data: tmp_a_data,
-                            k: k_ct,
-                            basek: basek,
-                        };
-                        tmp_a.trace::<Vec<u8>, _>(module, 0, log_n, ct_lo, auto_keys, scratch_1);
-
-                        // Zeroes the first coefficient of ct_hi
-                        // ct_hi = [a, b, c, d] - TRACE([a, b, c, d]) = [0, b, c, d]
-                        let (tmp_b_data, scratch_2) = scratch_1.tmp_vec_znx(module, rank + 1, size);
-                        let mut tmp_b: GLWECiphertext<&mut [u8]> = GLWECiphertext {
-                            data: tmp_b_data,
-                            k: k_ct,
-                            basek: basek,
-                        };
-                        tmp_b.trace::<Vec<u8>, _>(module, 0, log_n, ct_hi, auto_keys, scratch_2);
-
-                        ct_hi.sub_inplace_ab(module, &tmp_b);
-
-                        // Adds extracted coefficient of ct_lo on ct_hi
-                        // [a, 0, 0, 0] + [0, b, c, d]
-                        ct_hi.add_inplace(module, &tmp_a);
-                        ct_hi.normalize_inplace(module, scratch_2);
-
-                        // Cyclic shift ct_lo by X^-1
-                        ct_lo.rotate_inplace(module, -1);
-                    })
-                });
+        // Top of the tree is not stored in results.
+        if step == 0 {
+            tree_hi = &mut self.data;
+            tree_lo = &mut self.tree[0];
+        } else {
+            let (left, right) = self.tree.split_at_mut(step);
+            tree_hi = &mut left[left.len() - 1];
+            tree_lo = &mut right[0];
         }
 
+        tree_hi
+            .chunks_mut(module.n())
+            .enumerate()
+            .for_each(|(j, chunk)| {
+                // Retrieve the associated polynomial to extract and pack related to the current chunk
+                let ct_lo: &mut GLWECiphertext<Vec<u8>> = &mut tree_lo[j];
+
+                inv_coordinate.product_inplace(module, ct_lo, scratch);
+
+                chunk.iter_mut().for_each(|ct_hi| {
+                    // Extract the first coefficient ct_lo
+                    // tmp_a = TRACE([a, b, c, d]) -> [a, 0, 0, 0]
+                    let (tmp_a_data, scratch_1) = scratch.tmp_vec_znx(module, rank + 1, size);
+                    let mut tmp_a: GLWECiphertext<&mut [u8]> = GLWECiphertext {
+                        data: tmp_a_data,
+                        k: k_ct,
+                        basek: basek,
+                    };
+                    tmp_a.trace::<Vec<u8>, Vec<u8>>(module, 0, log_n, ct_lo, auto_keys, scratch_1);
+
+                    // Zeroes the first coefficient of ct_hi
+                    // ct_hi = [a, b, c, d] - TRACE([a, b, c, d]) = [0, b, c, d]
+                    let (tmp_b_data, scratch_2) = scratch_1.tmp_vec_znx(module, rank + 1, size);
+                    let mut tmp_b: GLWECiphertext<&mut [u8]> = GLWECiphertext {
+                        data: tmp_b_data,
+                        k: k_ct,
+                        basek: basek,
+                    };
+                    tmp_b.trace::<Vec<u8>, Vec<u8>>(module, 0, log_n, ct_hi, auto_keys, scratch_2);
+
+                    ct_hi.sub_inplace_ab(module, &tmp_b);
+
+                    // Adds extracted coefficient of ct_lo on ct_hi
+                    // [a, 0, 0, 0] + [0, b, c, d]
+                    ct_hi.add_inplace(module, &tmp_a);
+                    ct_hi.normalize_inplace(module, scratch_2);
+
+                    // Cyclic shift ct_lo by X^-1
+                    ct_lo.rotate_inplace(module, -1);
+                })
+            });
+    }
+
+    fn write_last_step<DataCoordinate>(
+        &mut self,
+        module: &Module<FFT64>,
+        inv_coordinate: &Coordinate<DataCoordinate>,
+        scratch: &mut Scratch,
+    ) where
+        MatZnxDft<DataCoordinate, FFT64>: MatZnxDftToRef<FFT64>,
+    {
         // Apply the last reverse shift to the top of the tree.
         self.data.iter_mut().for_each(|ct_lo| {
-            let coordinate: &Coordinate<Vec<u8>> = address.at(0);
-
-            let mut coordinate_inv: Coordinate<Vec<u8>> = Coordinate::alloc(
-                module,
-                basek,
-                address.k(),
-                address.rows(),
-                rank,
-                &coordinate.base1d.clone(),
-            ); // DODO ALLOC FROM SCRATCH SPACE
-
-            // Inverts coordinate: X^{i} -> X^{-i}
-            coordinate_inv.invert(
-                module,
-                coordinate,
-                auto_keys.get(&-1).unwrap(),
-                tensor_key,
-                scratch,
-                sk,
-            );
-
-            coordinate_inv.product_inplace(module, ct_lo, scratch);
+            inv_coordinate.product_inplace(module, ct_lo, scratch);
         });
-
         self.state = false;
     }
 }
