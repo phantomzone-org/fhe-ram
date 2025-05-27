@@ -99,7 +99,7 @@ fn packing() {
             sigma,
             scratch.borrow(),
         );
-        module.vec_znx_rotate_inplace(-(1 << log_batch), &mut pt, 0); // X^-batch * pt
+        module.vec_znx_rotate_inplace(-(1 << log_batch), &mut pt.data, 0); // X^-batch * pt
 
         if reverse_bits_msb(i, log_n as u32) % 5 == 0 {
             packer.add(&module, &mut res, Some(&ct), &auto_keys, scratch.borrow());
@@ -137,9 +137,9 @@ fn packing() {
         println!("{}", pt.data);
 
         if i & 1 == 0 {
-            module.vec_znx_sub_ab_inplace(&mut pt, 0, &pt_want, 0);
+            module.vec_znx_sub_ab_inplace(&mut pt.data, 0, &pt_want.data, 0);
         } else {
-            module.vec_znx_add_inplace(&mut pt, 0, &pt_want, 0);
+            module.vec_znx_add_inplace(&mut pt.data, 0, &pt_want.data, 0);
         }
 
         let noise_have = pt.data.std(0, basek).log2();

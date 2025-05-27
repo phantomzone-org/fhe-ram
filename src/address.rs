@@ -6,10 +6,7 @@ use core::{
     tensor_key::TensorKey,
 };
 
-use backend::{
-    FFT64, MatZnxDft, MatZnxDftToMut, MatZnxDftToRef, Module, ScalarZnxDft, ScalarZnxDftToRef,
-    Scratch, ScratchOwned, VecZnx, VecZnxToMut, VecZnxToRef, ZnxViewMut,
-};
+use backend::{FFT64, Module, Scratch, ScratchOwned, ZnxViewMut};
 use itertools::izip;
 use sampling::source::{Source, new_seed};
 
@@ -146,11 +143,8 @@ impl Coordinate<Vec<u8>> {
     }
 }
 
-impl<D> Coordinate<D>
-where
-    MatZnxDft<D, FFT64>: MatZnxDftToMut<FFT64>,
-{
-    pub(crate) fn encrypt_sk<DataSk>(
+impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
+    pub(crate) fn encrypt_sk<DataSk: AsRef<[u8]>>(
         &mut self,
         value: i64,
         module: &Module<FFT64>,
@@ -159,9 +153,7 @@ where
         source_xe: &mut Source,
         sigma: f64,
         scratch: &mut Scratch,
-    ) where
-        ScalarZnxDft<DataSk, FFT64>: ScalarZnxDftToRef<FFT64>,
-    {
+    ) {
         let n: usize = module.n();
         let (mut scalar, scratch1) = scratch.tmp_scalar_znx(module, 1);
         let sign: i64 = value.signum();
@@ -196,7 +188,7 @@ where
         });
     }
 
-    pub(crate) fn invert<DataOther, DataAK, DataTK>(
+    pub(crate) fn invert<DataOther: AsRef<[u8]>, DataAK: AsRef<[u8]>, DataTK: AsRef<[u8]>>(
         &mut self,
         module: &Module<FFT64>,
         other: &Coordinate<DataOther>,
@@ -204,11 +196,7 @@ where
         tensor_key: &TensorKey<DataTK, FFT64>,
         scratch: &mut Scratch,
         sk: &SecretKey<Vec<u8>>,
-    ) where
-        MatZnxDft<DataOther, FFT64>: MatZnxDftToRef<FFT64>,
-        MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
-        MatZnxDft<DataTK, FFT64>: MatZnxDftToRef<FFT64>,
-    {
+    ) {
         assert!(auto_key.p() == -1);
         assert_eq!(
             self.value.len(),
@@ -229,20 +217,14 @@ where
     }
 }
 
-impl<D> Coordinate<D>
-where
-    MatZnxDft<D, FFT64>: MatZnxDftToRef<FFT64>,
-{
-    pub(crate) fn product<DataRes, DataA>(
+impl<D: AsRef<[u8]>> Coordinate<D> {
+    pub(crate) fn product<DataRes: AsMut<[u8]> + AsRef<[u8]>, DataA: AsRef<[u8]>>(
         &self,
         module: &Module<FFT64>,
         res: &mut GLWECiphertext<DataRes>,
         a: &GLWECiphertext<DataA>,
         scratch: &mut Scratch,
-    ) where
-        VecZnx<DataRes>: VecZnxToMut,
-        VecZnx<DataA>: VecZnxToRef,
-    {
+    ) {
         self.value.iter().enumerate().for_each(|(i, coordinate)| {
             if i == 0 {
                 res.external_product(module, a, coordinate, scratch);
@@ -252,14 +234,12 @@ where
         });
     }
 
-    pub(crate) fn product_inplace<DataRes>(
+    pub(crate) fn product_inplace<DataRes: AsMut<[u8]> + AsRef<[u8]>>(
         &self,
         module: &Module<FFT64>,
         res: &mut GLWECiphertext<DataRes>,
         scratch: &mut Scratch,
-    ) where
-        VecZnx<DataRes>: VecZnxToMut,
-    {
+    ) {
         self.value.iter().for_each(|coordinate| {
             res.external_product_inplace(module, coordinate, scratch);
         });

@@ -1,9 +1,9 @@
-use core::{automorphism::AutomorphismKey, elem::Infos, glwe_ciphertext::GLWECiphertext};
+use core::{
+    automorphism::AutomorphismKey, elem::Infos, glwe_ciphertext::GLWECiphertext, glwe_ops::GLWEOps,
+};
 use std::collections::HashMap;
 
-use backend::{
-    FFT64, MatZnxDft, MatZnxDftToRef, Module, Scratch, VecZnx, VecZnxAlloc, VecZnxToRef,
-};
+use backend::{FFT64, Module, Scratch, VecZnxAlloc};
 
 pub(crate) struct StreamPacker {
     accumulators: Vec<Accumulator>,
@@ -63,17 +63,14 @@ impl StreamPacker {
         pack_core_scratch_space(module, ct_size, autokey_size, rank)
     }
 
-    pub(crate) fn add<DataA, DataAK>(
+    pub(crate) fn add<DataA: AsRef<[u8]>, DataAK: AsRef<[u8]>>(
         &mut self,
         module: &Module<FFT64>,
         res: &mut Vec<GLWECiphertext<Vec<u8>>>,
         a: Option<&GLWECiphertext<DataA>>,
         auto_keys: &HashMap<i64, AutomorphismKey<DataAK, FFT64>>,
         scratch: &mut Scratch,
-    ) where
-        VecZnx<DataA>: VecZnxToRef,
-        MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
-    {
+    ) {
         pack_core(
             module,
             a,
@@ -93,15 +90,13 @@ impl StreamPacker {
         }
     }
 
-    pub(crate) fn flush<DataAK>(
+    pub(crate) fn flush<DataAK: AsRef<[u8]>>(
         &mut self,
         module: &Module<FFT64>,
         res: &mut Vec<GLWECiphertext<Vec<u8>>>,
         auto_keys: &HashMap<i64, AutomorphismKey<DataAK, FFT64>>,
         scratch: &mut Scratch,
-    ) where
-        MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
-    {
+    ) {
         if self.counter != 0 {
             while self.counter != 0 {
                 self.add(
@@ -125,17 +120,14 @@ fn pack_core_scratch_space(
     combine_scratch_space(module, ct_size, autokey_size, rank)
 }
 
-fn pack_core<D, DataAK>(
+fn pack_core<D: AsRef<[u8]>, DataAK: AsRef<[u8]>>(
     module: &Module<FFT64>,
     a: Option<&GLWECiphertext<D>>,
     accumulators: &mut [Accumulator],
     i: usize,
     auto_keys: &HashMap<i64, AutomorphismKey<DataAK, FFT64>>,
     scratch: &mut Scratch,
-) where
-    VecZnx<D>: VecZnxToRef,
-    MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
-{
+) {
     let log_n: usize = module.log_n();
 
     if i == log_n {
@@ -169,7 +161,14 @@ fn pack_core<D, DataAK>(
                 scratch,
             );
         } else {
-            pack_core(module, None, acc_next, i + 1, auto_keys, scratch);
+            pack_core(
+                module,
+                None::<&GLWECiphertext<Vec<u8>>>,
+                acc_next,
+                i + 1,
+                auto_keys,
+                scratch,
+            );
         }
     }
 }
@@ -191,17 +190,14 @@ fn combine_scratch_space(
             ))
 }
 
-fn combine<D, DataAK>(
+fn combine<D: AsRef<[u8]>, DataAK: AsRef<[u8]>>(
     module: &Module<FFT64>,
     acc: &mut Accumulator,
     b: Option<&GLWECiphertext<D>>,
     i: usize,
     auto_keys: &HashMap<i64, AutomorphismKey<DataAK, FFT64>>,
     scratch: &mut Scratch,
-) where
-    VecZnx<D>: VecZnxToRef,
-    MatZnxDft<DataAK, FFT64>: MatZnxDftToRef<FFT64>,
-{
+) {
     let log_n: usize = module.log_n();
     let a: &mut GLWECiphertext<Vec<u8>> = &mut acc.data;
     let basek: usize = a.basek();

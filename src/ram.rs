@@ -1,16 +1,14 @@
 use core::{
     automorphism::AutomorphismKey,
     glwe_ciphertext::GLWECiphertext,
+    glwe_ops::GLWEOps,
     glwe_plaintext::GLWEPlaintext,
     keys::{SecretKey, SecretKeyFourier},
     tensor_key::TensorKey,
 };
 use std::collections::HashMap;
 
-use backend::{
-    Encoding, FFT64, MatZnxDft, MatZnxDftToRef, Module, Scratch, ScratchOwned, VecZnx, VecZnxAlloc,
-    VecZnxToRef,
-};
+use backend::{Encoding, FFT64, Module, Scratch, ScratchOwned, VecZnxAlloc};
 use itertools::izip;
 use sampling::source::{Source, new_seed};
 
@@ -150,16 +148,13 @@ impl Ram {
         res
     }
 
-    pub fn write<DataW>(
+    pub fn write<DataW: AsRef<[u8]>>(
         &mut self,
         w: &Vec<GLWECiphertext<DataW>>, // Must encrypt [w, 0, 0, ..., 0];
         address: &Address,
         keys: &EvaluationKeys,
         sk: &SecretKey<Vec<u8>>,
-    ) where
-        VecZnx<DataW>: VecZnxToRef,
-        DataW: std::convert::AsRef<[u8]>, // TODO FIX THIS
-    {
+    ) {
         assert!(w.len() == self.subrams.len());
 
         let params: &Parameters = &self.params;
@@ -466,16 +461,14 @@ impl SubRam {
         res
     }
 
-    fn write_first_step<DataW>(
+    fn write_first_step<DataW: AsRef<[u8]>>(
         &mut self,
         params: &Parameters,
         w: &GLWECiphertext<DataW>,
         n2: usize,
         auto_keys: &HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>>,
         scratch: &mut Scratch,
-    ) where
-        VecZnx<DataW>: VecZnxToRef,
-    {
+    ) {
         assert_eq!(
             self.state, true,
             "invalid call to Memory.read: internal state is true -> requires calling Memory.write_after_read"
@@ -508,16 +501,14 @@ impl SubRam {
         to_write_on.normalize_inplace(module, scratch);
     }
 
-    fn write_mid_step<DataCoordinate>(
+    fn write_mid_step<DataCoordinate: AsRef<[u8]>>(
         &mut self,
         step: usize,
         params: &Parameters,
         inv_coordinate: &Coordinate<DataCoordinate>,
         auto_keys: &HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>>,
         scratch: &mut Scratch,
-    ) where
-        MatZnxDft<DataCoordinate, FFT64>: MatZnxDftToRef<FFT64>,
-    {
+    ) {
         let module: &Module<FFT64> = params.module();
         let log_n: usize = module.log_n();
         let basek: usize = params.basek();
@@ -581,14 +572,12 @@ impl SubRam {
             });
     }
 
-    fn write_last_step<DataCoordinate>(
+    fn write_last_step<DataCoordinate: AsRef<[u8]>>(
         &mut self,
         module: &Module<FFT64>,
         inv_coordinate: &Coordinate<DataCoordinate>,
         scratch: &mut Scratch,
-    ) where
-        MatZnxDft<DataCoordinate, FFT64>: MatZnxDftToRef<FFT64>,
-    {
+    ) {
         // Apply the last reverse shift to the top of the tree.
         self.data.iter_mut().for_each(|ct_lo| {
             inv_coordinate.product_inplace(module, ct_lo, scratch);
