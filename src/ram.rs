@@ -15,6 +15,7 @@ use crate::{
     reverse_bits_msb,
 };
 
+
 /// [Ram] core implementation of the FHE-RAM.
 pub struct Ram {
     pub(crate) params: Parameters,
@@ -23,6 +24,7 @@ pub struct Ram {
 }
 
 impl Ram {
+
     /// Instantiates a new [Ram].
     pub fn new() -> Self {
         let params: Parameters = Parameters::new();
@@ -149,6 +151,8 @@ impl Ram {
         res
     }
 
+    /// Writes w to the [Ram]. Requires that [Self::read_prepare_write] was
+    /// called beforehand.
     pub fn write<DataW: AsRef<[u8]>>(
         &mut self,
         w: &Vec<GLWECiphertext<DataW>>, // Must encrypt [w, 0, 0, ..., 0];
@@ -226,6 +230,7 @@ impl Ram {
     }
 }
 
+/// [SubRam] stores a digit of the word.
 pub(crate) struct SubRam {
     data: Vec<GLWECiphertext<Vec<u8>>>,
     tree: Vec<Vec<GLWECiphertext<Vec<u8>>>>,
@@ -527,6 +532,7 @@ impl SubRam {
                 inv_coordinate.product_inplace(module, ct_lo, scratch);
 
                 chunk.iter_mut().for_each(|ct_hi| {
+
                     // Zeroes the first coefficient of ct_hi
                     // ct_hi = [a, b, c, d] - TRACE([a, b, c, d]) = [0, b, c, d]
                     let (mut tmp_a, scratch_1) = scratch.tmp_glwe_ct(module, basek, k_ct, rank);
