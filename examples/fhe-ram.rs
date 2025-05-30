@@ -65,7 +65,7 @@ fn main() {
     });
 
     let start: Instant = Instant::now();
-    ram.write::<Vec<u8>>(&ct_w, &addr, &keys, &sk);
+    ram.write::<Vec<u8>>(&ct_w, &addr, &keys);
     let duration: std::time::Duration = start.elapsed();
     println!("Elapsed time: {} ms", duration.as_millis());
 

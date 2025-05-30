@@ -15,18 +15,18 @@ pub const RAM_CHUNKS: usize = 4;
 pub const MAX_ADDR: usize = 1 << 18;
 
 pub struct Parameters {
-    module: Module<FFT64>,
-    basek: usize,
-    rank: usize,
-    k_pt: usize,
-    k_ct: usize,
-    k_addr: usize,
-    k_evk: usize,
-    xs: f64,
-    xe: f64,
-    max_addr: usize,
-    decomp_n: Vec<u8>,
-    ram_chunks: usize,
+    module: Module<FFT64>, // FFT/NTT tables.
+    basek: usize,          // Torus 2^{-k} decomposition.
+    rank: usize,           // GLWE/GGLWE/GGSW rank.
+    k_pt: usize,           // Ram plaintext (GLWE) Torus precision.
+    k_ct: usize,           // Ram ciphertext (GLWE) Torus precision.
+    k_addr: usize,         // Ram address (GGSW) Torus precision.
+    k_evk: usize,          // Ram evaluation keys (GGLWE) Torus precision
+    xs: f64,               // Secret-key distribution.
+    xe: f64,               // Noise standard deviation.
+    max_addr: usize,       // Maximum supported address.
+    decomp_n: Vec<u8>,     // Digit decomposition of N.
+    ram_chunks: usize,     // Digit decomposition of a Ram word.
 }
 
 impl Parameters {

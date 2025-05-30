@@ -10,7 +10,8 @@ use crate::parameters::Parameters;
 
 /// [Address] stores GGSW(X^{addr}) in decomposed
 /// form. That is, given addr = prod X^{a_i}, then
-/// it stores Vec<GGSW(X^{a_0}), GGSW(X^{a_1}), ...>.
+/// it stores Vec<[Coordinate]:(X^{a_0}), [Coordinate]:(X^{a_1}), ...>.
+/// where [a_0, a_1, ...] is the representation in base N of a.
 ///
 /// Such decomposition is necessary if the ring degree
 /// N is smaller than the maximum supported address.
@@ -46,6 +47,7 @@ impl Address {
         }
     }
 
+    /// Encrypts an u32 value into an [Address] under the provided secret.
     pub fn encrypt_sk(&mut self, params: &Parameters, value: u32, sk: &SecretKey<Vec<u8>>) {
         debug_assert!(self.base2d.max() > value as usize);
 
@@ -99,12 +101,25 @@ impl Address {
     }
 }
 
+/// Coordinate stores Vec<GGSW(X^a_i)> such that prod X^{a_i} = a.
+/// This provides a second decomposition over the one in base N to
+/// to ensure that the digits are small enough to enable HE operation
+/// over the digits (e.g. 2-4 bits digits instead of log(N)-bits digits).
 pub(crate) struct Coordinate<D> {
     pub(crate) value: Vec<GGSWCiphertext<D, FFT64>>,
     pub(crate) base1d: Base1D,
 }
 
 impl Coordinate<Vec<u8>> {
+    /// Allocates a new [Coordinate].
+    ///
+    /// # Arguments
+    ///
+    /// * `module`: pre-computed FFT tables.
+    /// * `basek`: base 2 logarithm of the
+    /// * `rows`: number of digits for the key-switching decomposition.
+    /// * `rank`: rank of the GLWE/GGLE/GGSW ciphertexts.
+    /// * `base1d`: digit decomposition of the coordinate (e.g. [12], [6, 6], [4, 4, 4] or [3, 3, 3, 3] for LogN = 12).
     pub(crate) fn alloc(
         module: &Module<FFT64>,
         basek: usize,
@@ -124,37 +139,50 @@ impl Coordinate<Vec<u8>> {
         }
     }
 
+    /// Scratch space required to invert a coordinate, i.e. map GGSW(X^{i}) to GGSW(X^{-i}).
     pub(crate) fn invert_scratch_space(params: &Parameters) -> usize {
         GGSWCiphertext::automorphism_scratch_space(
-            params.module(),
-            params.basek(),
-            params.k_addr(),
-            params.k_addr(),
-            params.k_evk(),
-            params.k_evk(),
-            params.rank(),
+            params.module(), // FFT/NTT Tables.
+            params.basek(),  // Torus base 2 decomposition.
+            params.k_addr(), // Output GGSW Torus precision.
+            params.k_addr(), // Input GGSW Torus precision.
+            params.k_evk(),  // Automorphism GLWE Torus precision.
+            params.k_evk(),  // Tensor GLWE Torus precision.
+            params.rank(),   // GLWE/GGLWE/GGSW rank.
         )
     }
 
+    /// Scratch space required to evaluate GGSW(X^{i}) * GLWE(m).
     pub(crate) fn product_scratch_space(params: &Parameters) -> usize {
         GLWECiphertext::external_product_scratch_space(
-            params.module(),
-            params.basek(),
-            params.k_ct(),
-            params.k_ct(),
-            params.k_addr(),
-            params.rank(),
+            params.module(), // FFT/NTT Tables.
+            params.basek(),  // Torus base 2 decomposition.
+            params.k_ct(),   // Output GLWE Torus precision.
+            params.k_ct(),   // Input GLWE Torus precision.
+            params.k_addr(), // Address GGSW Torus precision.
+            params.rank(),   // GLWE/GGSW rank.
         ) | GLWECiphertext::external_product_inplace_scratch_space(
-            params.module(),
-            params.basek(),
-            params.k_ct(),
-            params.k_addr(),
-            params.rank(),
+            params.module(), // FFT/NTT Tables.
+            params.basek(),  // Torus base 2 decomposition.
+            params.k_ct(),   // Input/Output GLWE Torus precision.
+            params.k_addr(), // Address GGSW Torus precision.
+            params.rank(),   // GLWE/GGSW rank.
         )
     }
 }
 
 impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
+    /// Encrypts a value in [-N+1, N-1] as GGSW(X^{value}).
+    ///
+    /// #Arguments
+    ///
+    /// * `value`: value to encrypt.
+    /// * `module`: FFT/NTT tables.
+    /// * `sk_dft`: secret in Fourier domain.
+    /// * `source_xa`: random coins generator for public polynomials.
+    /// * `source_xe`: random coins generator for noise.
+    /// * `sigma`: standard deviation of the noise.
+    /// * `scratch`: scratch space provider.
     pub(crate) fn encrypt_sk<DataSk: AsRef<[u8]>>(
         &mut self,
         value: i64,
@@ -166,6 +194,9 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
         scratch: &mut Scratch,
     ) {
         let n: usize = module.n();
+
+        assert!(value.abs() < n as i64);
+
         let (mut scalar, scratch1) = scratch.tmp_scalar_znx(module, 1);
         let sign: i64 = value.signum();
         let gap: usize = 1; // self.base1d.gap(module.log_n());
@@ -199,6 +230,15 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
         });
     }
 
+    /// Maps GGSW(X^{i}) to GGSW(X^{-i}).
+    ///
+    /// #Arguments
+    ///
+    /// * `module`: FFT/NTT tables.
+    /// * `other`: coordinate to invert.
+    /// * `auto_key`: GGLWE(AUTO(s, -1)).
+    /// * `tensor_key`: GGLWE(TENSOR(s)).
+    /// * `scratch`: scratch space provider.
     pub(crate) fn invert<DataOther: AsRef<[u8]>, DataAK: AsRef<[u8]>, DataTK: AsRef<[u8]>>(
         &mut self,
         module: &Module<FFT64>,
@@ -206,7 +246,6 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
         auto_key: &AutomorphismKey<DataAK, FFT64>,
         tensor_key: &TensorKey<DataTK, FFT64>,
         scratch: &mut Scratch,
-        sk: &SecretKey<Vec<u8>>,
     ) {
         assert!(auto_key.p() == -1);
         assert_eq!(
@@ -217,10 +256,6 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
             other.value.len()
         );
 
-        let mut sk_dft: SecretKeyFourier<Vec<u8>, FFT64> =
-            SecretKeyFourier::alloc(module, sk.rank());
-        sk_dft.dft(module, sk);
-
         izip!(self.value.iter_mut(), other.value.iter()).for_each(|(value, other)| {
             value.automorphism(module, other, auto_key, tensor_key, scratch);
         });
@@ -229,6 +264,7 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
 }
 
 impl<D: AsRef<[u8]>> Coordinate<D> {
+    /// Evaluates GLWE(m) * GGSW(X^i).
     pub(crate) fn product<DataRes: AsMut<[u8]> + AsRef<[u8]>, DataA: AsRef<[u8]>>(
         &self,
         module: &Module<FFT64>,
@@ -245,6 +281,7 @@ impl<D: AsRef<[u8]>> Coordinate<D> {
         });
     }
 
+    /// Evaluates GLWE(m) * GGSW(X^i).
     pub(crate) fn product_inplace<DataRes: AsMut<[u8]> + AsRef<[u8]>>(
         &self,
         module: &Module<FFT64>,
@@ -257,23 +294,26 @@ impl<D: AsRef<[u8]>> Coordinate<D> {
     }
 }
 
+/// Helper for 1D digit decomposition.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Base1D(pub Vec<u8>);
+pub(crate) struct Base1D(pub Vec<u8>);
 
 impl Base1D {
-    pub fn max(&self) -> usize {
+    pub(crate) fn max(&self) -> usize {
         let mut max: usize = 1;
         self.0.iter().for_each(|i| max <<= i);
         max
     }
 
-    pub fn gap(&self, log_n: usize) -> usize {
+    #[allow(dead_code)]
+    pub(crate) fn gap(&self, log_n: usize) -> usize {
         let mut gap: usize = log_n;
         self.0.iter().for_each(|i| gap >>= i);
         1 << gap
     }
 
-    pub fn decomp(&self, value: u32) -> Vec<u8> {
+    #[allow(dead_code)]
+    pub(crate) fn decomp(&self, value: u32) -> Vec<u8> {
         let mut decomp: Vec<u8> = Vec::new();
         let mut sum_bases: u8 = 0;
         self.0.iter().for_each(|base| {
@@ -283,7 +323,8 @@ impl Base1D {
         decomp
     }
 
-    pub fn recomp(&self, decomp: &Vec<u8>) -> u32 {
+    #[allow(dead_code)]
+    pub(crate) fn recomp(&self, decomp: &Vec<u8>) -> u32 {
         let mut value: u32 = 0;
         let mut sum_bases: u8 = 0;
         self.0.iter().enumerate().for_each(|(i, base)| {
@@ -294,15 +335,16 @@ impl Base1D {
     }
 }
 
+/// Helpe for 2D digit decomposition.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Base2D(pub Vec<Base1D>);
+pub(crate) struct Base2D(pub Vec<Base1D>);
 
 impl Base2D {
-    pub fn max(&self) -> usize {
+    pub(crate) fn max(&self) -> usize {
         self.as_1d().max()
     }
 
-    pub fn as_1d(&self) -> Base1D {
+    pub(crate) fn as_1d(&self) -> Base1D {
         Base1D(
             self.0
                 .iter()
@@ -311,11 +353,13 @@ impl Base2D {
         )
     }
 
-    pub fn decomp(&self, value: u32) -> Vec<u8> {
+    #[allow(dead_code)]
+    pub(crate) fn decomp(&self, value: u32) -> Vec<u8> {
         self.as_1d().decomp(value)
     }
 
-    pub fn recomp(&self, decomp: &Vec<u8>) -> u32 {
+    #[allow(dead_code)]
+    pub(crate) fn recomp(&self, decomp: &Vec<u8>) -> u32 {
         self.as_1d().recomp(decomp)
     }
 }

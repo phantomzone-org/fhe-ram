@@ -15,6 +15,7 @@ use crate::{
     reverse_bits_msb,
 };
 
+/// [Ram] core implementation of the FHE-RAM.
 pub struct Ram {
     pub(crate) params: Parameters,
     pub(crate) subrams: Vec<SubRam>,
@@ -22,6 +23,7 @@ pub struct Ram {
 }
 
 impl Ram {
+    /// Instantiates a new [Ram].
     pub fn new() -> Self {
         let params: Parameters = Parameters::new();
         let scratch: ScratchOwned = ScratchOwned::new(Self::scratch_bytes(&params));
@@ -38,6 +40,7 @@ impl Ram {
         }
     }
 
+    /// Scratch space size required by the [Ram].
     pub(crate) fn scratch_bytes(params: &Parameters) -> usize {
         let module: &Module<FFT64> = params.module();
         let k_ct: usize = params.k_ct();
@@ -59,6 +62,7 @@ impl Ram {
         enc_sk | read | write
     }
 
+    /// Initialize the FHE-[Ram] with provided values (encrypted inder the provided secret).
     pub fn encrypt_sk(&mut self, data: &[u8], sk: &SecretKey<Vec<u8>>) {
         let params: &Parameters = &self.params;
         let max_addr: usize = params.max_addr();
@@ -93,6 +97,9 @@ impl Ram {
         });
     }
 
+    /// Simple read from the [Ram] at the provided encrypted address.
+    /// Returns a vector of [GLWECiphertext], where each ciphertext stores
+    /// Enc(m_i) where is the i-th digit of the word-size such that m = m_0 | m-1 | ...
     pub fn read(
         &mut self,
         address: &Address,
@@ -116,6 +123,9 @@ impl Ram {
         res
     }
 
+    /// Read that prepares the [Ram] of a subsequent [Self::write].
+    /// Outside of preparing the [Ram] for a write, the behavior and
+    /// output format is identical to [Self::read].
     pub fn read_prepare_write(
         &mut self,
         address: &Address,
@@ -144,7 +154,6 @@ impl Ram {
         w: &Vec<GLWECiphertext<DataW>>, // Must encrypt [w, 0, 0, ..., 0];
         address: &Address,
         keys: &EvaluationKeys,
-        sk: &SecretKey<Vec<u8>>,
     ) {
         assert!(w.len() == self.subrams.len());
 
@@ -156,9 +165,6 @@ impl Ram {
         let scratch: &mut Scratch = self.scratch.borrow();
         let auto_keys: &HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>> = &keys.auto_keys;
         let tensor_key: &TensorKey<Vec<u8>, FFT64> = &keys.tensor_key;
-
-        let mut sk_dft: SecretKeyFourier<Vec<u8>, FFT64> = SecretKeyFourier::alloc(module, rank);
-        sk_dft.dft(module, sk);
 
         // Overwrites the coefficient that was read: to_write_on = to_write_on - TRACE(to_write_on) + w
         self.subrams.iter_mut().enumerate().for_each(|(i, subram)| {
@@ -187,7 +193,6 @@ impl Ram {
                 auto_keys.get(&-1).unwrap(),
                 tensor_key,
                 scratch,
-                sk,
             );
 
             self.subrams.iter_mut().for_each(|subram| {
@@ -213,7 +218,6 @@ impl Ram {
             auto_keys.get(&-1).unwrap(),
             tensor_key,
             scratch,
-            sk,
         );
 
         self.subrams.iter_mut().for_each(|subram| {
@@ -523,7 +527,6 @@ impl SubRam {
                 inv_coordinate.product_inplace(module, ct_lo, scratch);
 
                 chunk.iter_mut().for_each(|ct_hi| {
-
                     // Zeroes the first coefficient of ct_hi
                     // ct_hi = [a, b, c, d] - TRACE([a, b, c, d]) = [0, b, c, d]
                     let (mut tmp_a, scratch_1) = scratch.tmp_glwe_ct(module, basek, k_ct, rank);

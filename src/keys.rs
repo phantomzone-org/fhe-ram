@@ -6,11 +6,13 @@ use sampling::source::{Source, new_seed};
 
 use crate::parameters::Parameters;
 
+/// Struct storing the FHE evaluation keys for the read/write on FHE-RAM.
 pub struct EvaluationKeys {
     pub(crate) auto_keys: HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>>,
     pub(crate) tensor_key: TensorKey<Vec<u8>, FFT64>,
 }
 
+/// Generates a new set of [EvaluationKeys] along with the associated secret-key.
 pub fn gen_keys(params: &Parameters) -> (SecretKey<Vec<u8>>, EvaluationKeys) {
     let module: &Module<FFT64> = &params.module();
     let basek: usize = params.basek();
