@@ -1,36 +1,12 @@
 # FHE-RAM: Encrypted Random Access Memory Demonstration
 
-**FHE-RAM** is an experimental prototype demonstrating how to implement fully homomorphic encrypted read/write RAM using [**Poulpy**](https://github.com/phantomzone-org/poulpy) — a modular and high-performance lattice-based FHE library.
+This repository demonstrates how [Poulpy](https://github.com/phantomzone-org/poulpy), a modular and high-performance lattice-based FHE library, can be used to implement fully homomorphic encrypted read/write RAM.
 
-This project is **not** intended as a general-purpose library. It serves as a **research-oriented example** to highlight Poulpy's core features and APIs for secure, encrypted computation.
-
----
-
-## 🧠 Purpose
-
-This repository demonstrates how [Poulpy](https://github.com/phantomzone-org/poulpy) can be used to:
-
-* Implement encrypted memory with read/write access.
-* Leverage GLWE/GGLWE/GGSW ciphertexts for indexing and control logic.
-* Perform non-trivial, stateful homomorphic operations efficiently.
+The FHE-RAM example use a combination of GLWE, GGLWE and GGSW ciphertext operations to provide encrypted read/write access on an encrypted database using encrypted address.
 
 ---
 
-## 🧱 Built With
-
-* [Poulpy](https://github.com/phantomzone-org/poulpy): The core lattice-FHE backend.
-* Rust: For performance and memory safety in low-level cryptographic code.
-
----
-
-## 🔍 Capabilities
-
-* Simulates a RAM with encrypted address and data lines.
-* Supports homomorphic read and write operations.
-
----
-
-## 📁 Repository Structure
+## Repository Structure
 
 ```text
 fhe-ram/
@@ -42,7 +18,7 @@ fhe-ram/
 
 ---
 
-## 🧰 Installing Dependencies
+## Installing Dependencies
 
 This example requires a local installation of [Poulpy](https://github.com/phantomzone-org/poulpy).
 
@@ -75,20 +51,27 @@ cargo run --release --example fhe-ram
 
 ---
 
-## ❗ Disclaimer
+## Disclaimer
 
 This is **research code**, not production software. It is intended for experimentation and validation of encrypted memory concepts.
 
 ---
 
-## 📜 License
+## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
 
 ---
 
-## 👥 Acknowledgments
+## Citing
 
-This project is part of the [PhantomZone](https://github.com/phantomzone-org) initiative to advance homomorphic encryption and verifiable computing.
 
----
+```
+@misc{fhe-ram,
+    title = {FHE-RAM},
+    howpublished = {Online: \url{https://github.com/phantomzone-org/fhe-ram}},
+    month = May,
+    year = 2025,
+    note = {Jean-Philippe Bossuat, Janmajaya Mall}
+}
+```
