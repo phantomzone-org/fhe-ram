@@ -9,16 +9,16 @@ The FHE-RAM example use a combination of GLWE, GGLWE and GGSW ciphertext operati
 ## Parameterization & Performance
 
 ```rust
-const LOG_N: usize = 12; 					// Lattice degree
-const BASEK: usize = 17; 					// Torus 2^{-k} decomposition basis.
-const RANK: usize = 1;						// GLWE/GGLWE/GGSW rank.
+const LOG_N: usize = 12;                    // Lattice degree
+const BASEK: usize = 17;                    // Torus 2^{-k} decomposition basis.
+const RANK: usize = 1;                      // GLWE/GGLWE/GGSW rank.
 const K_PT: usize = (u8::BITS as usize) + 1;// Ram plaintext (GLWE) Torus precision.
-const K_CT: usize = BASEK * 3;				// Ram ciphertext (GLWE) Torus precision.
-const K_ADDR: usize = BASEK * 4;	        // Ram address (GGSW) Torus precision.		
+const K_CT: usize = BASEK * 3;              // Ram ciphertext (GLWE) Torus precision.
+const K_ADDR: usize = BASEK * 4;            // Ram address (GGSW) Torus precision.		
 const K_EVK: usize = BASEK * 5;             // Ram evaluation keys (GGLWE) Torus precision
 const XS: f64 = 0.5;                        // Secret-key distribution.
 const XE: f64 = 3.2;                        // Noise standard deviation.
-const DECOMP_N: [u8; 4] = [3, 3, 3, 3]; 	// Digit decomposition of N.
+const DECOMP_N: [u8; 4] = [3, 3, 3, 3];     // Digit decomposition of N.
 ```
 
 ### Performance
