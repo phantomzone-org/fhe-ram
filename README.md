@@ -1,6 +1,6 @@
 # FHE-RAM: Encrypted Random Access Memory Demonstration
 
-**FHE-RAM** is an experimental prototype demonstrating how to implement fully homomorphic encrypted read/write RAM using [**Poulpy**](https://github.com/phantomzone-org/poulpy) — a modular and high-performance backend for lattice-based FHE schemes.
+**FHE-RAM** is an experimental prototype demonstrating how to implement fully homomorphic encrypted read/write RAM using [**Poulpy**](https://github.com/phantomzone-org/poulpy) — a modular and high-performance lattice-based FHE library.
 
 This project is **not** intended as a general-purpose library. It serves as a **research-oriented example** to highlight Poulpy's core features and APIs for secure, encrypted computation.
 
