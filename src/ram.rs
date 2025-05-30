@@ -1,21 +1,16 @@
 use core::{
-    automorphism::AutomorphismKey,
-    glwe_ciphertext::GLWECiphertext,
-    glwe_ops::GLWEOps,
-    glwe_plaintext::GLWEPlaintext,
-    keys::{SecretKey, SecretKeyFourier},
-    tensor_key::TensorKey,
+    AutomorphismKey, GLWECiphertext, GLWEOps, GLWEPlaintext, ScratchCore, SecretKey,
+    SecretKeyFourier, StreamPacker, TensorKey,
 };
 use std::collections::HashMap;
 
-use backend::{Encoding, FFT64, Module, Scratch, ScratchOwned, VecZnxAlloc};
+use backend::{Encoding, FFT64, Module, Scratch, ScratchOwned};
 use itertools::izip;
 use sampling::source::{Source, new_seed};
 
 use crate::{
     address::{Address, Coordinate},
     keys::EvaluationKeys,
-    packing::StreamPacker,
     parameters::Parameters,
     reverse_bits_msb,
 };
@@ -50,20 +45,16 @@ impl Ram {
         let basek: usize = params.basek();
         let rank: usize = params.rank();
 
-        let ct_glwe_size: usize = (k_ct + basek - 1) / basek;
-        let autokey_size: usize = (k_evk + basek - 1) / basek;
-
-        let enc_sk: usize = GLWECiphertext::encrypt_sk_scratch_space(module, ct_glwe_size);
+        let enc_sk: usize = GLWECiphertext::encrypt_sk_scratch_space(module, basek, k_ct);
         let coordinate_product: usize = Coordinate::product_scratch_space(params);
-        let packing: usize =
-            StreamPacker::add_scratch_space(module, ct_glwe_size, autokey_size, rank);
+        let packing: usize = StreamPacker::scratch_space(module, basek, k_ct, k_evk, rank);
         let trace: usize =
-            GLWECiphertext::trace_inplace_scratch_space(module, ct_glwe_size, autokey_size, rank);
-        let vec_znx: usize = module.bytes_of_vec_znx(rank + 1, ct_glwe_size);
+            GLWECiphertext::trace_inplace_scratch_space(module, basek, k_ct, k_evk, rank);
+        let ct: usize = GLWECiphertext::bytes_of(module, basek, k_ct, rank);
         let inv_addr: usize = Coordinate::invert_scratch_space(params);
 
         let read: usize = coordinate_product | trace | packing;
-        let write: usize = coordinate_product | 2 * vec_znx + trace | inv_addr;
+        let write: usize = coordinate_product | ct + trace | inv_addr;
 
         enc_sk | read | write
     }
@@ -476,10 +467,9 @@ impl SubRam {
 
         let module: &Module<FFT64> = params.module();
         let log_n: usize = module.log_n();
-        let rank: usize = params.rank();
-        let k_ct: usize = params.k_ct();
         let basek: usize = params.basek();
-        let size: usize = params.size_ct();
+        let k_ct: usize = params.k_ct();
+        let rank: usize = params.rank();
 
         let to_write_on: &mut GLWECiphertext<Vec<u8>>;
 
@@ -489,12 +479,7 @@ impl SubRam {
             to_write_on = &mut self.data[0];
         }
 
-        let (tmp_a_data, scratch_1) = scratch.tmp_vec_znx(module, rank + 1, size);
-        let mut tmp_a: GLWECiphertext<&mut [u8]> = GLWECiphertext {
-            data: tmp_a_data,
-            k: k_ct,
-            basek: basek,
-        };
+        let (mut tmp_a, scratch_1) = scratch.tmp_glwe_ct(module, basek, k_ct, rank);
         tmp_a.trace::<Vec<u8>, _>(module, 0, log_n, to_write_on, auto_keys, scratch_1);
         to_write_on.sub_inplace_ab(module, &tmp_a);
         to_write_on.add_inplace(module, w);
@@ -514,7 +499,6 @@ impl SubRam {
         let basek: usize = params.basek();
         let k_ct: usize = params.k_ct();
         let rank: usize = params.rank();
-        let size: usize = params.size_ct();
 
         let tree_hi: &mut Vec<GLWECiphertext<Vec<u8>>>; // Above level
         let tree_lo: &mut Vec<GLWECiphertext<Vec<u8>>>; // Current level
@@ -539,32 +523,21 @@ impl SubRam {
                 inv_coordinate.product_inplace(module, ct_lo, scratch);
 
                 chunk.iter_mut().for_each(|ct_hi| {
-                    // Extract the first coefficient ct_lo
-                    // tmp_a = TRACE([a, b, c, d]) -> [a, 0, 0, 0]
-                    let (tmp_a_data, scratch_1) = scratch.tmp_vec_znx(module, rank + 1, size);
-                    let mut tmp_a: GLWECiphertext<&mut [u8]> = GLWECiphertext {
-                        data: tmp_a_data,
-                        k: k_ct,
-                        basek: basek,
-                    };
-                    tmp_a.trace::<Vec<u8>, Vec<u8>>(module, 0, log_n, ct_lo, auto_keys, scratch_1);
 
                     // Zeroes the first coefficient of ct_hi
                     // ct_hi = [a, b, c, d] - TRACE([a, b, c, d]) = [0, b, c, d]
-                    let (tmp_b_data, scratch_2) = scratch_1.tmp_vec_znx(module, rank + 1, size);
-                    let mut tmp_b: GLWECiphertext<&mut [u8]> = GLWECiphertext {
-                        data: tmp_b_data,
-                        k: k_ct,
-                        basek: basek,
-                    };
-                    tmp_b.trace::<Vec<u8>, Vec<u8>>(module, 0, log_n, ct_hi, auto_keys, scratch_2);
+                    let (mut tmp_a, scratch_1) = scratch.tmp_glwe_ct(module, basek, k_ct, rank);
+                    tmp_a.trace::<Vec<u8>, Vec<u8>>(module, 0, log_n, ct_hi, auto_keys, scratch_1);
+                    ct_hi.sub_inplace_ab(module, &tmp_a);
 
-                    ct_hi.sub_inplace_ab(module, &tmp_b);
+                    // Extract the first coefficient ct_lo
+                    // tmp_a = TRACE([a, b, c, d]) -> [a, 0, 0, 0]
+                    tmp_a.trace::<Vec<u8>, Vec<u8>>(module, 0, log_n, ct_lo, auto_keys, scratch_1);
 
                     // Adds extracted coefficient of ct_lo on ct_hi
                     // [a, 0, 0, 0] + [0, b, c, d]
                     ct_hi.add_inplace(module, &tmp_a);
-                    ct_hi.normalize_inplace(module, scratch_2);
+                    ct_hi.normalize_inplace(module, scratch_1);
 
                     // Cyclic shift ct_lo by X^-1
                     ct_lo.rotate_inplace(module, -1);

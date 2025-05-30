@@ -1,9 +1,4 @@
-use core::{
-    automorphism::AutomorphismKey,
-    glwe_ciphertext::GLWECiphertext,
-    keys::{SecretKey, SecretKeyFourier},
-    tensor_key::TensorKey,
-};
+use core::{AutomorphismKey, GLWECiphertext, SecretKey, SecretKeyFourier, TensorKey};
 use std::collections::HashMap;
 
 use backend::{FFT64, Module, ScratchOwned};
@@ -20,7 +15,6 @@ pub fn gen_keys(params: &Parameters) -> (SecretKey<Vec<u8>>, EvaluationKeys) {
     let module: &Module<FFT64> = &params.module();
     let basek: usize = params.basek();
     let k_evk: usize = params.k_evk();
-    let size_evk: usize = params.size_evk();
     let rows: usize = params.rows_addr();
     let rank: usize = params.rank();
 
@@ -28,8 +22,9 @@ pub fn gen_keys(params: &Parameters) -> (SecretKey<Vec<u8>>, EvaluationKeys) {
     let mut source_2: Source = Source::new(new_seed());
 
     let mut scratch: ScratchOwned = ScratchOwned::new(
-        AutomorphismKey::generate_from_sk_scratch_space(module, rank, size_evk)
-            | TensorKey::generate_from_sk_scratch_space(module, rank, size_evk),
+        AutomorphismKey::generate_from_sk_scratch_space(module, basek, k_evk, rank)
+            | AutomorphismKey::generate_from_sk_scratch_space(module, basek, k_evk, rank)
+            | TensorKey::generate_from_sk_scratch_space(module, basek, k_evk, rank),
     );
 
     let mut sk: SecretKey<Vec<u8>> = SecretKey::alloc(module, params.rank());

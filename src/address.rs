@@ -1,9 +1,5 @@
 use core::{
-    automorphism::AutomorphismKey,
-    ggsw_ciphertext::GGSWCiphertext,
-    glwe_ciphertext::GLWECiphertext,
-    keys::{SecretKey, SecretKeyFourier},
-    tensor_key::TensorKey,
+    AutomorphismKey, GGSWCiphertext, GLWECiphertext, SecretKey, SecretKeyFourier, TensorKey,
 };
 
 use backend::{FFT64, Module, Scratch, ScratchOwned, ZnxViewMut};
@@ -12,6 +8,12 @@ use sampling::source::{Source, new_seed};
 
 use crate::parameters::Parameters;
 
+/// [Address] stores GGSW(X^{addr}) in decomposed
+/// form. That is, given addr = prod X^{a_i}, then
+/// it stores Vec<GGSW(X^{a_0}), GGSW(X^{a_1}), ...>.
+///
+/// Such decomposition is necessary if the ring degree
+/// N is smaller than the maximum supported address.
 pub struct Address {
     coordinates: Vec<Coordinate<Vec<u8>>>,
     k: usize,
@@ -20,6 +22,7 @@ pub struct Address {
 }
 
 impl Address {
+    /// Allocates a new [Address].
     pub fn alloc(params: &Parameters) -> Self {
         let max_addr: usize = params.max_addr();
         let decomp_n: Vec<u8> = params.decomp_n();
@@ -46,13 +49,15 @@ impl Address {
     pub fn encrypt_sk(&mut self, params: &Parameters, value: u32, sk: &SecretKey<Vec<u8>>) {
         debug_assert!(self.base2d.max() > value as usize);
 
-        let module: &Module<FFT64> = &params.module();
+        let module: &Module<FFT64> = params.module();
+        let basek: usize = params.basek();
         let rank: usize = params.rank();
-        let size: usize = (params.k_evk() + params.basek() - 1) / params.basek();
+        let k: usize = params.k_addr();
         let sigma: f64 = params.xe();
 
-        let mut scratch: ScratchOwned =
-            ScratchOwned::new(GGSWCiphertext::encrypt_sk_scratch_space(module, rank, size));
+        let mut scratch: ScratchOwned = ScratchOwned::new(
+            GGSWCiphertext::encrypt_sk_scratch_space(module, basek, k, rank),
+        );
 
         let mut sk_dft: SecretKeyFourier<Vec<u8>, FFT64> = SecretKeyFourier::alloc(module, rank);
         sk_dft.dft(module, sk);
@@ -122,23 +127,29 @@ impl Coordinate<Vec<u8>> {
     pub(crate) fn invert_scratch_space(params: &Parameters) -> usize {
         GGSWCiphertext::automorphism_scratch_space(
             params.module(),
-            params.size_addr(),
-            params.size_addr(),
-            params.size_evk(),
-            params.size_evk(),
+            params.basek(),
+            params.k_addr(),
+            params.k_addr(),
+            params.k_evk(),
+            params.k_evk(),
             params.rank(),
         )
     }
 
     pub(crate) fn product_scratch_space(params: &Parameters) -> usize {
-        let module: &Module<FFT64> = params.module();
-        let size_glwe: usize = (params.k_ct() + params.basek() - 1) / params.basek();
-        let rank: usize = params.rank();
-        let ggsw_size: usize = (params.k_evk() + params.basek() - 1) / params.basek();
         GLWECiphertext::external_product_scratch_space(
-            module, size_glwe, rank, size_glwe, ggsw_size,
-        ) | GLWECiphertext::external_product_scratch_space(
-            module, size_glwe, rank, size_glwe, ggsw_size,
+            params.module(),
+            params.basek(),
+            params.k_ct(),
+            params.k_ct(),
+            params.k_addr(),
+            params.rank(),
+        ) | GLWECiphertext::external_product_inplace_scratch_space(
+            params.module(),
+            params.basek(),
+            params.k_ct(),
+            params.k_addr(),
+            params.rank(),
         )
     }
 }

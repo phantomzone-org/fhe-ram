@@ -1,9 +1,4 @@
-use core::{
-    elem::Infos,
-    glwe_ciphertext::GLWECiphertext,
-    glwe_plaintext::GLWEPlaintext,
-    keys::{SecretKey, SecretKeyFourier},
-};
+use core::{GLWECiphertext, GLWEPlaintext, Infos, SecretKey, SecretKeyFourier};
 use std::time::Instant;
 
 use backend::{Decoding, Encoding, FFT64, Module, ScratchOwned};
@@ -110,7 +105,8 @@ fn encrypt_glwe(
         .encode_coeff_i64(0, basek, k_pt, 0, value as i64, u8::BITS as usize);
     let mut scratch: ScratchOwned = ScratchOwned::new(GLWECiphertext::encrypt_sk_scratch_space(
         module,
-        ct_w.size(),
+        basek,
+        ct_w.k(),
     ));
     let mut source_xa: Source = Source::new(new_seed());
     let mut source_xe: Source = Source::new(new_seed());
@@ -139,7 +135,7 @@ fn decrypt_glwe(
     let k: usize = ct.k();
     let mut pt: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(module, basek, k);
     let mut scratch: ScratchOwned =
-        ScratchOwned::new(GLWECiphertext::decrypt_scratch_space(module, ct.size()));
+        ScratchOwned::new(GLWECiphertext::decrypt_scratch_space(module, basek, ct.k()));
     let mut sk_dft: SecretKeyFourier<Vec<u8>, backend::FFT64> =
         SecretKeyFourier::alloc(module, sk.rank());
     sk_dft.dft(module, &sk);

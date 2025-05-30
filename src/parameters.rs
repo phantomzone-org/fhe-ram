@@ -81,10 +81,6 @@ impl Parameters {
         self.xe
     }
 
-    pub fn size_ct(&self) -> usize {
-        (self.k_ct() + self.basek() - 1) / self.basek()
-    }
-
     pub(crate) fn ram_chunks(&self) -> usize {
         self.ram_chunks
     }
@@ -97,20 +93,12 @@ impl Parameters {
         self.xs
     }
 
-    pub(crate) fn size_addr(&self) -> usize {
-        (self.k_addr() + self.basek() - 1) / self.basek()
-    }
-
-    pub(crate) fn size_evk(&self) -> usize {
-        (self.k_evk() + self.basek() - 1) / self.basek()
-    }
-
     pub(crate) fn rows_ct(&self) -> usize {
-        self.size_ct()
+        (self.k_ct() + self.basek() - 1) / self.basek()
     }
 
     pub(crate) fn rows_addr(&self) -> usize {
-        self.size_addr()
+        (self.k_addr() + self.basek() - 1) / self.basek()
     }
 
     pub(crate) fn decomp_n(&self) -> Vec<u8> {
