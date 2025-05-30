@@ -55,8 +55,11 @@ fn main() {
     });
 
     // Reads from the FHE-RAM (with preparing for write)
+    let start: Instant = Instant::now();
     let ct: Vec<GLWECiphertext<Vec<u8>>> = ram.read_prepare_write(&addr, &keys);
-
+    let duration: std::time::Duration = start.elapsed();
+    println!("Elapsed time: {} ms", duration.as_millis());
+    
     // Checks correctness
     (0..ws).for_each(|i| {
         let want: u8 = data[i + idx as usize];

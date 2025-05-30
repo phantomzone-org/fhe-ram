@@ -9,10 +9,9 @@ const K_ADDR: usize = BASEK * 4;
 const K_EVK: usize = BASEK * 5;
 const XS: f64 = 0.5;
 const XE: f64 = 3.2;
-pub const DECOMP_N: [u8; 4] = [3, 3, 3, 3];
-
-pub const WORDSIZE: usize = 8;
-pub const MAX_ADDR: usize = 1 << 17;
+pub const DECOMP_N: [u8; 2] = [6, 6];
+const WORDSIZE: usize = 4;
+const MAX_ADDR: usize = 1 << 18;
 
 pub struct Parameters {
     module: Module<FFT64>, // FFT/NTT tables.
