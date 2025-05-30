@@ -15,7 +15,6 @@ use crate::{
     reverse_bits_msb,
 };
 
-
 /// [Ram] core implementation of the FHE-RAM.
 pub struct Ram {
     pub(crate) params: Parameters,
@@ -24,14 +23,13 @@ pub struct Ram {
 }
 
 impl Ram {
-
     /// Instantiates a new [Ram].
     pub fn new() -> Self {
         let params: Parameters = Parameters::new();
         let scratch: ScratchOwned = ScratchOwned::new(Self::scratch_bytes(&params));
 
         let mut subrams: Vec<SubRam> = Vec::new();
-        (0..params.ram_chunks()).for_each(|_| {
+        (0..params.word_size()).for_each(|_| {
             subrams.push(SubRam::alloc(&params));
         });
 
@@ -68,7 +66,7 @@ impl Ram {
     pub fn encrypt_sk(&mut self, data: &[u8], sk: &SecretKey<Vec<u8>>) {
         let params: &Parameters = &self.params;
         let max_addr: usize = params.max_addr();
-        let ram_chunks: usize = params.ram_chunks();
+        let ram_chunks: usize = params.word_size();
 
         assert!(
             data.len() % ram_chunks == 0,
@@ -532,7 +530,6 @@ impl SubRam {
                 inv_coordinate.product_inplace(module, ct_lo, scratch);
 
                 chunk.iter_mut().for_each(|ct_hi| {
-
                     // Zeroes the first coefficient of ct_hi
                     // ct_hi = [a, b, c, d] - TRACE([a, b, c, d]) = [0, b, c, d]
                     let (mut tmp_a, scratch_1) = scratch.tmp_glwe_ct(module, basek, k_ct, rank);

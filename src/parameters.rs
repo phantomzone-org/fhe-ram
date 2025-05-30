@@ -9,10 +9,10 @@ const K_ADDR: usize = BASEK * 4;
 const K_EVK: usize = BASEK * 5;
 const XS: f64 = 0.5;
 const XE: f64 = 3.2;
-pub const DECOMP_N: [u8; 2] = [6, 6];
+pub const DECOMP_N: [u8; 4] = [3, 3, 3, 3];
 
-pub const RAM_CHUNKS: usize = 4;
-pub const MAX_ADDR: usize = 1 << 18;
+pub const WORDSIZE: usize = 8;
+pub const MAX_ADDR: usize = 1 << 17;
 
 pub struct Parameters {
     module: Module<FFT64>, // FFT/NTT tables.
@@ -26,7 +26,7 @@ pub struct Parameters {
     xe: f64,               // Noise standard deviation.
     max_addr: usize,       // Maximum supported address.
     decomp_n: Vec<u8>,     // Digit decomposition of N.
-    ram_chunks: usize,     // Digit decomposition of a Ram word.
+    word_size: usize,      // Digit decomposition of a Ram word.
 }
 
 impl Parameters {
@@ -45,7 +45,7 @@ impl Parameters {
             xe: XE,
             max_addr: MAX_ADDR,
             decomp_n: DECOMP_N.to_vec(),
-            ram_chunks: RAM_CHUNKS,
+            word_size: WORDSIZE,
         }
     }
 
@@ -81,8 +81,8 @@ impl Parameters {
         self.xe
     }
 
-    pub(crate) fn ram_chunks(&self) -> usize {
-        self.ram_chunks
+    pub fn word_size(&self) -> usize {
+        self.word_size
     }
 
     pub(crate) fn k_evk(&self) -> usize {

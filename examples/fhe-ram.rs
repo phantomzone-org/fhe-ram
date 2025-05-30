@@ -7,28 +7,42 @@ use rand_core::RngCore;
 use sampling::source::{Source, new_seed};
 
 fn main() {
+    // See parameters.rs for configuration
     let params: Parameters = Parameters::new();
+
+    // Generates a new secret-key along with the public evaluation keys.
     let (sk, keys) = gen_keys(&params);
 
+    // Some randomness
     let mut source: Source = Source::new([0u8; 32]);
 
-    let chunks: usize = 4;
+    // Word-size
+    let ws: usize = params.word_size();
 
-    let mut data: Vec<u8> = vec![0u8; params.max_addr() * chunks];
+    // Allocates some dummy data
+    let mut data: Vec<u8> = vec![0u8; params.max_addr() * ws];
     data.iter_mut().for_each(|x| *x = source.next_u32() as u8);
 
+    // Instantiates the FHE-RAM
     let mut ram: Ram = Ram::new();
 
+    // Populates the FHE-RAM
     ram.encrypt_sk(&data, &sk);
 
+    // Allocates an encrypted address.
     let mut addr: Address = Address::alloc(&params);
 
+    // Random index
     let idx: u32 = source.next_u32() % params.max_addr() as u32;
 
+    // Encrypts random index
     addr.encrypt_sk(&params, idx, &sk);
 
+    // Reads from the FHE-RAM
     let ct: Vec<GLWECiphertext<Vec<u8>>> = ram.read(&addr, &keys);
-    (0..chunks).for_each(|i| {
+
+    // Checks correctness
+    (0..ws).for_each(|i| {
         let want: u8 = data[i + idx as usize];
         let noise: f64 = decrypt_glwe(&params, &ct[i], want, &sk);
         println!("noise: {}", noise);
@@ -40,9 +54,11 @@ fn main() {
         );
     });
 
+    // Reads from the FHE-RAM (with preparing for write)
     let ct: Vec<GLWECiphertext<Vec<u8>>> = ram.read_prepare_write(&addr, &keys);
 
-    (0..chunks).for_each(|i| {
+    // Checks correctness
+    (0..ws).for_each(|i| {
         let want: u8 = data[i + idx as usize];
         let noise: f64 = decrypt_glwe(&params, &ct[i], want, &sk);
         println!("noise: {}", noise);
@@ -54,29 +70,34 @@ fn main() {
         );
     });
 
-    let mut value: Vec<u8> = vec![0u8; chunks];
+    // Value to write on the FHE-RAM
+    let mut value: Vec<u8> = vec![0u8; ws];
     value.iter_mut().for_each(|x| {
         *x = source.next_u32() as u8;
     });
 
+    // Encryptes value to write on the FHE-RAM
     let mut ct_w: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
-    (0..chunks).for_each(|i| {
+    (0..ws).for_each(|i| {
         ct_w.push(encrypt_glwe(&params, value[i], &sk));
     });
 
+    // Writes on the FHE-RAM
     let start: Instant = Instant::now();
     ram.write::<Vec<u8>>(&ct_w, &addr, &keys);
     let duration: std::time::Duration = start.elapsed();
     println!("Elapsed time: {} ms", duration.as_millis());
 
-    // Updates plaintext memory
-    (0..chunks).for_each(|i| {
+    // Updates plaintext ram
+    (0..ws).for_each(|i| {
         data[i + idx as usize] = value[i];
     });
 
+    // Reads back at the written index
     let ct: Vec<GLWECiphertext<Vec<u8>>> = ram.read(&addr, &keys);
 
-    (0..chunks).for_each(|i| {
+    // Checks correctness
+    (0..ws).for_each(|i| {
         let want: u8 = data[i + idx as usize];
         let noise: f64 = decrypt_glwe(&params, &ct[i], want, &sk);
         println!("noise: {}", noise);
