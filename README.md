@@ -4,8 +4,6 @@ This repository demonstrates how [Poulpy](https://github.com/phantomzone-org/pou
 
 The FHE-RAM example use a combination of GLWE, GGLWE and GGSW ciphertext operations to provide encrypted read/write access on an encrypted database using encrypted address.
 
----
-
 ## Parameterization & Performance
 
 ```rust
@@ -63,7 +61,6 @@ RAM Size| Word Size | Age | Country    |
   2^18  |   8xu8    | 25  | Canada     |
   2^20  |           | 35  | Australia  |
 
----
 
 ## Installing Dependencies
 
@@ -86,9 +83,8 @@ make
 
 > ⚠️ These steps assume a Linux environment. For other platforms, refer to the [spqlios-arithmetic build guide](https://github.com/tfhe/spqlios-arithmetic/wiki/build).
 
----
 
-## ▶️ Running the Example
+## Running the Example
 
 Run the RAM simulation example with:
 
@@ -96,19 +92,15 @@ Run the RAM simulation example with:
 cargo run --release --example fhe-ram
 ```
 
----
-
 ## Disclaimer
 
 This is **research code**, not production software. It is intended for experimentation and validation of encrypted memory concepts.
 
----
 
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
 
----
 
 ## Citing
 
