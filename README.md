@@ -1,4 +1,4 @@
-# FHE-RAM: Encrypted Random Access Memory Demonstration
+# FHE-RAM: Encrypted Random Access Memory
 
 This repository demonstrates how [Poulpy](https://github.com/phantomzone-org/poulpy), a modular and high-performance lattice-based FHE library, can be used to implement fully homomorphic encrypted read/write RAM.
 
@@ -52,15 +52,6 @@ bdd                  :: rop: ≈2^168.5, red: ≈2^168.5, svp: ≈2^163.9, β: 4
 dual                 :: rop: ≈2^170.5, mem: ≈2^107.0, m: ≈2^12.0, β: 473, d: 8181, ↻: 1, tag: dual
 dual_hybrid          :: rop: ≈2^167.9, red: ≈2^167.9, guess: ≈2^158.4, β: 464, p: 5, ζ: 20, t: 40, β': 464, N: ≈2^95.6, m: ≈2^12.0
 ```
-
-
-RAM Size| Word Size | Age | Country    |
-|-------|-----------|-----|------------|
-  2^14  |   4xu8    |     |            |
-  2^16  |   4xu8    | 30  | USA        |
-  2^18  |   8xu8    | 25  | Canada     |
-  2^20  |           | 35  | Australia  |
-
 
 ## Installing Dependencies
 
