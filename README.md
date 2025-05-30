@@ -65,18 +65,6 @@ RAM Size| Word Size | Age | Country    |
 
 ---
 
-## Repository Structure
-
-```text
-fhe-ram/
-├── src/          # Core logic using Poulpy APIs
-├── examples/     # Demonstration example(s)
-├── Cargo.toml    # Project configuration
-└── README.md     # You're here
-```
-
----
-
 ## Installing Dependencies
 
 This example requires a local installation of [Poulpy](https://github.com/phantomzone-org/poulpy).
