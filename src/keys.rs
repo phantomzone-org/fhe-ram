@@ -1,4 +1,4 @@
-use core::{AutomorphismKey, GLWECiphertext, SecretKey, SecretKeyFourier, TensorKey};
+use core::{AutomorphismKey, GLWECiphertext, GLWESecret, TensorKey};
 use std::collections::HashMap;
 
 use backend::{FFT64, Module, ScratchOwned};
@@ -13,7 +13,7 @@ pub struct EvaluationKeys {
 }
 
 /// Generates a new set of [EvaluationKeys] along with the associated secret-key.
-pub fn gen_keys(params: &Parameters) -> (SecretKey<Vec<u8>>, EvaluationKeys) {
+pub fn gen_keys(params: &Parameters) -> (GLWESecret<Vec<u8>, FFT64>, EvaluationKeys) {
     let module: &Module<FFT64> = &params.module();
     let basek: usize = params.basek();
     let k_evk: usize = params.k_evk();
@@ -29,11 +29,8 @@ pub fn gen_keys(params: &Parameters) -> (SecretKey<Vec<u8>>, EvaluationKeys) {
             | TensorKey::generate_from_sk_scratch_space(module, basek, k_evk, rank),
     );
 
-    let mut sk: SecretKey<Vec<u8>> = SecretKey::alloc(module, params.rank());
-    sk.fill_ternary_prob(params.xs(), &mut source_1);
-
-    let mut sk_dft: SecretKeyFourier<Vec<u8>, FFT64> = SecretKeyFourier::alloc(module, rank);
-    sk_dft.dft(module, &sk);
+    let mut sk: GLWESecret<Vec<u8>, FFT64> = GLWESecret::alloc(module, params.rank());
+    sk.fill_ternary_prob(&module, params.xs(), &mut source_1);
 
     let gal_els: Vec<i64> = GLWECiphertext::trace_galois_elements(&module);
 
@@ -56,7 +53,7 @@ pub fn gen_keys(params: &Parameters) -> (SecretKey<Vec<u8>>, EvaluationKeys) {
     let mut tensor_key = TensorKey::alloc(module, basek, k_evk, rows, rank);
     tensor_key.generate_from_sk(
         module,
-        &sk_dft,
+        &sk,
         &mut source_1,
         &mut source_2,
         params.xe(),

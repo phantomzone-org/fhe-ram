@@ -1,6 +1,6 @@
 use core::{
-    AutomorphismKey, GLWECiphertext, GLWEOps, GLWEPlaintext, ScratchCore, SecretKey,
-    SecretKeyFourier, StreamPacker, TensorKey,
+    AutomorphismKey, GLWECiphertext, GLWEOps, GLWEPlaintext, GLWESecret, ScratchCore, StreamPacker,
+    TensorKey,
 };
 use std::collections::HashMap;
 
@@ -63,7 +63,7 @@ impl Ram {
     }
 
     /// Initialize the FHE-[Ram] with provided values (encrypted inder the provided secret).
-    pub fn encrypt_sk(&mut self, data: &[u8], sk: &SecretKey<Vec<u8>>) {
+    pub fn encrypt_sk(&mut self, data: &[u8], sk: &GLWESecret<Vec<u8>, FFT64>) {
         let params: &Parameters = &self.params;
         let max_addr: usize = params.max_addr();
         let ram_chunks: usize = params.word_size();
@@ -81,19 +81,14 @@ impl Ram {
             max_addr
         );
 
-        let module: &Module<FFT64> = &params.module();
         let scratch: &mut Scratch = self.scratch.borrow();
-        let rank: usize = params.rank();
-
-        let mut sk_dft: SecretKeyFourier<Vec<u8>, FFT64> = SecretKeyFourier::alloc(module, rank);
-        sk_dft.dft(module, sk);
 
         let mut data_split: Vec<u8> = vec![0u8; max_addr];
         (0..ram_chunks).for_each(|i| {
             data_split.iter_mut().enumerate().for_each(|(j, x)| {
                 *x = data[j + i];
             });
-            self.subrams[i].encrypt_sk(params, &data_split, &sk_dft, scratch);
+            self.subrams[i].encrypt_sk(params, &data_split, &sk, scratch);
         });
     }
 
@@ -269,7 +264,7 @@ impl SubRam {
         &mut self,
         params: &Parameters,
         data: &[u8],
-        sk_dft: &SecretKeyFourier<Vec<u8>, FFT64>,
+        sk: &GLWESecret<Vec<u8>, FFT64>,
         scratch: &mut Scratch,
     ) {
         let module: &Module<FFT64> = &params.module();
@@ -294,7 +289,7 @@ impl SubRam {
             ct.encrypt_sk::<_, Vec<u8>>(
                 module,
                 &pt,
-                &sk_dft,
+                &sk,
                 &mut source_xa,
                 &mut source_xe,
                 sigma,

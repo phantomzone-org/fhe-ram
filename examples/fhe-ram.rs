@@ -1,4 +1,4 @@
-use core::{GLWECiphertext, GLWEPlaintext, Infos, SecretKey, SecretKeyFourier};
+use core::{GLWECiphertext, GLWEPlaintext, GLWESecret, Infos};
 use std::time::Instant;
 
 use backend::{Decoding, Encoding, FFT64, Module, ScratchOwned};
@@ -59,7 +59,7 @@ fn main() {
     let ct: Vec<GLWECiphertext<Vec<u8>>> = ram.read_prepare_write(&addr, &keys);
     let duration: std::time::Duration = start.elapsed();
     println!("Elapsed time: {} ms", duration.as_millis());
-    
+
     // Checks correctness
     (0..ws).for_each(|i| {
         let want: u8 = data[i + idx as usize];
@@ -116,7 +116,7 @@ fn main() {
 fn encrypt_glwe(
     params: &Parameters,
     value: u8,
-    sk: &SecretKey<Vec<u8>>,
+    sk: &GLWESecret<Vec<u8>, FFT64>,
 ) -> GLWECiphertext<Vec<u8>> {
     let module: &Module<FFT64> = params.module();
     let basek: usize = params.basek();
@@ -134,12 +134,10 @@ fn encrypt_glwe(
     ));
     let mut source_xa: Source = Source::new(new_seed());
     let mut source_xe: Source = Source::new(new_seed());
-    let mut sk_dft: SecretKeyFourier<Vec<u8>, FFT64> = SecretKeyFourier::alloc(module, rank);
-    sk_dft.dft(module, &sk);
     ct_w.encrypt_sk(
         module,
         &pt_w,
-        &sk_dft,
+        &sk,
         &mut source_xa,
         &mut source_xe,
         params.xe(),
@@ -152,7 +150,7 @@ fn decrypt_glwe(
     params: &Parameters,
     ct: &GLWECiphertext<Vec<u8>>,
     want: u8,
-    sk: &SecretKey<Vec<u8>>,
+    sk: &GLWESecret<Vec<u8>, FFT64>,
 ) -> f64 {
     let module: &Module<FFT64> = params.module();
     let basek: usize = params.basek();
@@ -160,10 +158,7 @@ fn decrypt_glwe(
     let mut pt: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(module, basek, k);
     let mut scratch: ScratchOwned =
         ScratchOwned::new(GLWECiphertext::decrypt_scratch_space(module, basek, ct.k()));
-    let mut sk_dft: SecretKeyFourier<Vec<u8>, backend::FFT64> =
-        SecretKeyFourier::alloc(module, sk.rank());
-    sk_dft.dft(module, &sk);
-    ct.decrypt(module, &mut pt, &sk_dft, scratch.borrow());
+    ct.decrypt(module, &mut pt, &sk, scratch.borrow());
     let mut value: i64 = pt.data.decode_coeff_i64(0, basek, k, 0);
     value -= (want as i64) << (k - params.k_pt());
     let noise: f64 = ((value).abs() as f64).log2() - (k as f64);

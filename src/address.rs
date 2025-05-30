@@ -1,6 +1,4 @@
-use core::{
-    AutomorphismKey, GGSWCiphertext, GLWECiphertext, SecretKey, SecretKeyFourier, TensorKey,
-};
+use core::{AutomorphismKey, GGSWCiphertext, GLWECiphertext, GLWESecret, TensorKey};
 
 use backend::{FFT64, Module, Scratch, ScratchOwned, ZnxViewMut};
 use itertools::izip;
@@ -48,7 +46,7 @@ impl Address {
     }
 
     /// Encrypts an u32 value into an [Address] under the provided secret.
-    pub fn encrypt_sk(&mut self, params: &Parameters, value: u32, sk: &SecretKey<Vec<u8>>) {
+    pub fn encrypt_sk(&mut self, params: &Parameters, value: u32, sk: &GLWESecret<Vec<u8>, FFT64>) {
         debug_assert!(self.base2d.max() > value as usize);
 
         let module: &Module<FFT64> = params.module();
@@ -61,9 +59,6 @@ impl Address {
             GGSWCiphertext::encrypt_sk_scratch_space(module, basek, k, rank),
         );
 
-        let mut sk_dft: SecretKeyFourier<Vec<u8>, FFT64> = SecretKeyFourier::alloc(module, rank);
-        sk_dft.dft(module, sk);
-
         let mut source_xa: Source = Source::new(new_seed());
         let mut source_xe: Source = Source::new(new_seed());
 
@@ -74,7 +69,7 @@ impl Address {
             coordinate.encrypt_sk(
                 -(k as i64),
                 module,
-                &sk_dft,
+                &sk,
                 &mut source_xa,
                 &mut source_xe,
                 sigma,
@@ -187,7 +182,7 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
         &mut self,
         value: i64,
         module: &Module<FFT64>,
-        sk_dft: &SecretKeyFourier<DataSk, FFT64>,
+        sk: &GLWESecret<DataSk, FFT64>,
         source_xa: &mut Source,
         source_xe: &mut Source,
         sigma: f64,
@@ -215,9 +210,7 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
                 scalar.raw_mut()[chunk] = 1;
             }
 
-            coordinate.encrypt_sk(
-                module, &scalar, sk_dft, source_xa, source_xe, sigma, scratch1,
-            );
+            coordinate.encrypt_sk(module, &scalar, sk, source_xa, source_xe, sigma, scratch1);
 
             if sign < 0 && chunk != 0 {
                 scalar.raw_mut()[n - chunk] = 0;

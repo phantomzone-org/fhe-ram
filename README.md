@@ -26,7 +26,7 @@ const WORDSIZE: usize = 4;
 const MAX_ADDR: usize = 1 << 18;
 ```
 
-For a RAM-size of 2^18 with 4xu8 words, the above parameterization enables 500ms read and 1500ms write (i9-12900K single thread) with at least ~40mio read/write without having to refresh the RAM.
+For a RAM-size of 2^18 with 4xu8 words, the above parameterization enables 450ms read and 1200ms write (i9-12900K single thread) with at least ~40mio read/write without having to refresh the RAM.
 
 ### Security 
 
