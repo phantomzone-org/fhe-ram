@@ -3,7 +3,7 @@ use backend::{FFT64, Module};
 const LOG_N: usize = 12;
 const BASEK: usize = 17;
 const RANK: usize = 1;
-const K_PT: usize = (u8::BITS as usize) + 1;
+const K_PT: usize = u8::BITS as usize;
 const K_CT: usize = BASEK * 3;
 const K_ADDR: usize = BASEK * 4;
 const K_EVK: usize = BASEK * 5;
