@@ -96,7 +96,7 @@ impl Address {
     }
 }
 
-/// Coordinate stores Vec<GGSW(X^a_i)> such that prod X^{a_i} = a.
+/// Coordinate stores Vec<GGSW(X^a_i)> such that prod X^{a_i} = X^a.
 /// This provides a second decomposition over the one in base N to
 /// to ensure that the digits are small enough to enable HE operation
 /// over the digits (e.g. 2-4 bits digits instead of log(N)-bits digits).
@@ -111,7 +111,7 @@ impl Coordinate<Vec<u8>> {
     /// # Arguments
     ///
     /// * `module`: pre-computed FFT tables.
-    /// * `basek`: base 2 logarithm of the
+    /// * `basek`: base 2 logarithm of the limb in base2k representation
     /// * `rows`: number of digits for the key-switching decomposition.
     /// * `rank`: rank of the GLWE/GGLE/GGSW ciphertexts.
     /// * `base1d`: digit decomposition of the coordinate (e.g. [12], [6, 6], [4, 4, 4] or [3, 3, 3, 3] for LogN = 12).
@@ -168,7 +168,7 @@ impl Coordinate<Vec<u8>> {
 impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
     /// Encrypts a value in [-N+1, N-1] as GGSW(X^{value}).
     ///
-    /// #Arguments
+    /// # Arguments
     ///
     /// * `value`: value to encrypt.
     /// * `module`: FFT/NTT tables.

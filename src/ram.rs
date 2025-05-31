@@ -379,7 +379,7 @@ impl SubRam {
     ) -> GLWECiphertext<Vec<u8>> {
         assert_eq!(
             self.state, false,
-            "invalid call to Memory.read: internal state is true -> requires calling Memory.write_after_read"
+            "invalid call to Memory.read: internal state is true -> requires calling Memory.write"
         );
 
         let module: &Module<FFT64> = &params.module();
@@ -465,7 +465,7 @@ impl SubRam {
     ) {
         assert_eq!(
             self.state, true,
-            "invalid call to Memory.read: internal state is true -> requires calling Memory.write_after_read"
+            "invalid call to Memory.write: internal state is false -> requires calling Memory.read_prepare_write"
         );
 
         let module: &Module<FFT64> = params.module();
