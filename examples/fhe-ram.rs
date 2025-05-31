@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use backend::{Decoding, Encoding, FFT64, Module, ScratchOwned};
 use fhe_ram::{address::Address, keys::gen_keys, parameters::Parameters, ram::Ram};
+use itertools::Itertools;
 use rand_core::RngCore;
 use sampling::source::{Source, new_seed};
 
@@ -21,7 +22,7 @@ fn main() {
 
     // Allocates some dummy data
     let mut data: Vec<u8> = vec![0u8; params.max_addr() * ws];
-    data.iter_mut().for_each(|x| *x = source.next_u32() as u8);
+    source.fill_bytes(data.as_mut_slice());
 
     // Instantiates the FHE-RAM
     let mut ram: Ram = Ram::new();
@@ -75,15 +76,13 @@ fn main() {
 
     // Value to write on the FHE-RAM
     let mut value: Vec<u8> = vec![0u8; ws];
-    value.iter_mut().for_each(|x| {
-        *x = source.next_u32() as u8;
-    });
+    source.fill_bytes(value.as_mut_slice());
 
     // Encryptes value to write on the FHE-RAM
-    let mut ct_w: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
-    (0..ws).for_each(|i| {
-        ct_w.push(encrypt_glwe(&params, value[i], &sk));
-    });
+    let ct_w = value
+        .iter()
+        .map(|wi| encrypt_glwe(&params, *wi, &sk))
+        .collect_vec();
 
     // Writes on the FHE-RAM
     let start: Instant = Instant::now();
