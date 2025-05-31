@@ -27,14 +27,10 @@ impl Ram {
     pub fn new() -> Self {
         let params: Parameters = Parameters::new();
         let scratch: ScratchOwned = ScratchOwned::new(Self::scratch_bytes(&params));
-
-        let mut subrams: Vec<SubRam> = Vec::new();
-        (0..params.word_size()).for_each(|_| {
-            subrams.push(SubRam::alloc(&params));
-        });
-
         Self {
-            subrams,
+            subrams: (0..params.word_size())
+                .map(|_| SubRam::alloc(&params))
+                .collect(),
             params,
             scratch,
         }
@@ -105,17 +101,17 @@ impl Ram {
             "unitialized memory: self.data.len()=0"
         );
 
-        let mut res: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
-        self.subrams.iter_mut().for_each(|subram| {
-            res.push(subram.read(
-                &self.params,
-                address,
-                &keys.auto_keys,
-                self.scratch.borrow(),
-            ))
-        });
-
-        res
+        self.subrams
+            .iter_mut()
+            .map(|subram| {
+                subram.read(
+                    &self.params,
+                    address,
+                    &keys.auto_keys,
+                    self.scratch.borrow(),
+                )
+            })
+            .collect()
     }
 
     /// Read that prepares the [Ram] of a subsequent [Self::write].
@@ -131,17 +127,17 @@ impl Ram {
             "unitialized memory: self.data.len()=0"
         );
 
-        let mut res: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
-        self.subrams.iter_mut().for_each(|subram| {
-            res.push(subram.read_prepare_write(
-                &self.params,
-                address,
-                &keys.auto_keys,
-                self.scratch.borrow(),
-            ))
-        });
-
-        res
+        self.subrams
+            .iter_mut()
+            .map(|subram| {
+                subram.read_prepare_write(
+                    &self.params,
+                    address,
+                    &keys.auto_keys,
+                    self.scratch.borrow(),
+                )
+            })
+            .collect()
     }
 
     /// Writes w to the [Ram]. Requires that [Self::read_prepare_write] was
@@ -246,8 +242,9 @@ impl SubRam {
             let mut size: usize = (max_addr_split + n - 1) / n;
             while size != 1 {
                 size = (size + n - 1) / n;
-                let mut tmp: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
-                (0..size).for_each(|_| tmp.push(GLWECiphertext::alloc(module, basek, k_ct, rank)));
+                let tmp: Vec<GLWECiphertext<Vec<u8>>> = (0..size)
+                    .map(|_| GLWECiphertext::alloc(module, basek, k_ct, rank))
+                    .collect();
                 tree.push(tmp);
             }
         }
@@ -277,26 +274,30 @@ impl SubRam {
         let mut source_xa: Source = Source::new(new_seed());
         let mut source_xe: Source = Source::new(new_seed());
 
-        let cts: &mut Vec<GLWECiphertext<Vec<u8>>> = &mut self.data;
         let mut pt: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(module, basek, k_pt);
         let mut data_i64: Vec<i64> = vec![0i64; module.n()];
 
-        for chunk in data.chunks(module.n()) {
-            let mut ct: GLWECiphertext<Vec<u8>> = GLWECiphertext::alloc(module, basek, k_ct, rank);
-            izip!(data_i64.iter_mut(), chunk.iter()).for_each(|(xi64, xu8)| *xi64 = *xu8 as i64);
-            data_i64[chunk.len()..].iter_mut().for_each(|x| *x = 0);
-            pt.data.encode_vec_i64(0, basek, k_pt, &data_i64, 8);
-            ct.encrypt_sk::<_, Vec<u8>>(
-                module,
-                &pt,
-                &sk,
-                &mut source_xa,
-                &mut source_xe,
-                sigma,
-                scratch,
-            );
-            cts.push(ct);
-        }
+        self.data = data
+            .chunks(module.n())
+            .map(|chunk| {
+                let mut ct: GLWECiphertext<Vec<u8>> =
+                    GLWECiphertext::alloc(module, basek, k_ct, rank);
+                izip!(data_i64.iter_mut(), chunk.iter())
+                    .for_each(|(xi64, xu8)| *xi64 = *xu8 as i64);
+                data_i64[chunk.len()..].iter_mut().for_each(|x| *x = 0);
+                pt.data.encode_vec_i64(0, basek, k_pt, &data_i64, 8);
+                ct.encrypt_sk::<_, Vec<u8>>(
+                    module,
+                    &pt,
+                    &sk,
+                    &mut source_xa,
+                    &mut source_xe,
+                    sigma,
+                    scratch,
+                );
+                ct
+            })
+            .collect();
     }
 
     fn read(

@@ -33,12 +33,12 @@ impl Address {
         let rows: usize = params.rows_ct();
         let rank: usize = params.rank();
 
-        let mut coordinates: Vec<Coordinate<Vec<u8>>> = Vec::new();
-        base_2d.0.iter().for_each(|base1d| {
-            coordinates.push(Coordinate::alloc(module, basek, k, rows, rank, base1d))
-        });
         Self {
-            coordinates: coordinates,
+            coordinates: base_2d
+                .0
+                .iter()
+                .map(|base1d| Coordinate::alloc(module, basek, k, rows, rank, base1d))
+                .collect(),
             k,
             rows,
             base2d: base_2d.clone(),
@@ -123,13 +123,12 @@ impl Coordinate<Vec<u8>> {
         rank: usize,
         base1d: &Base1D,
     ) -> Self {
-        let mut coordinates: Vec<GGSWCiphertext<Vec<u8>, FFT64>> = Vec::new();
-        base1d
-            .0
-            .iter()
-            .for_each(|_| coordinates.push(GGSWCiphertext::alloc(module, basek, k, rows, rank)));
         Self {
-            value: coordinates,
+            value: base1d
+                .0
+                .iter()
+                .map(|_| GGSWCiphertext::alloc(module, basek, k, rows, rank))
+                .collect(),
             base1d: base1d.clone(),
         }
     }
@@ -307,13 +306,14 @@ impl Base1D {
 
     #[allow(dead_code)]
     pub(crate) fn decomp(&self, value: u32) -> Vec<u8> {
-        let mut decomp: Vec<u8> = Vec::new();
-        let mut sum_bases: u8 = 0;
-        self.0.iter().for_each(|base| {
-            decomp.push(((value >> sum_bases) & (1 << base) - 1) as u8);
-            sum_bases += base;
-        });
-        decomp
+        self.0
+            .iter()
+            .scan(0, |sum_bases, &base| {
+                let part = ((value >> *sum_bases) & ((1 << base) - 1)) as u8;
+                *sum_bases += base;
+                Some(part)
+            })
+            .collect()
     }
 
     #[allow(dead_code)]
@@ -358,25 +358,27 @@ impl Base2D {
 }
 
 pub(crate) fn get_base_2d(value: u32, base: Vec<u8>) -> Base2D {
-    let mut out: Vec<Base1D> = Vec::new();
-    let mut value_bit_size: u32 = 32 - (value - 1).leading_zeros();
+    let mut out = Vec::new();
+    let mut value_bit_size = 32 - (value - 1).leading_zeros();
 
-    'outer: while value_bit_size != 0 {
+    while value_bit_size != 0 {
         let mut v: Vec<u8> = Vec::new();
-        for i in 0..base.len() {
-            if base[i] as u32 <= value_bit_size {
-                v.push(base[i]);
-                value_bit_size -= base[i] as u32;
+
+        for &b in base.iter() {
+            if b as u32 <= value_bit_size {
+                v.push(b);
+                value_bit_size -= b as u32;
             } else {
                 if value_bit_size != 0 {
                     v.push(value_bit_size as u8);
+                    value_bit_size = 0;
                 }
-                out.push(Base1D(v));
-                break 'outer;
+                break;
             }
         }
 
-        out.push(Base1D(v))
+        out.push(Base1D(v)); // Single, unconditional push here
     }
+
     Base2D(out)
 }
