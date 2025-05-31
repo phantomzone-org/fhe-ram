@@ -160,7 +160,7 @@ fn decrypt_glwe(
         ScratchOwned::new(GLWECiphertext::decrypt_scratch_space(module, basek, ct.k()));
     ct.decrypt(module, &mut pt, &sk, scratch.borrow());
     let mut value: i64 = pt.data.decode_coeff_i64(0, basek, k, 0);
-    value -= (want as i64) << (k - params.k_pt());
+    value -= ((want as i8) as i64) << (k - params.k_pt());
     let noise: f64 = ((value).abs() as f64).log2() - (k as f64);
     noise
 }
