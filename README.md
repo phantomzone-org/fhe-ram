@@ -12,7 +12,7 @@ const BASEK: usize = 17;                    // Torus 2^{-k} decomposition basis.
 const RANK: usize = 1;                      // GLWE/GGLWE/GGSW rank.
 const K_PT: usize = (u8::BITS as usize) + 1;// Ram plaintext (GLWE) Torus precision.
 const K_CT: usize = BASEK * 3;              // Ram ciphertext (GLWE) Torus precision.
-const K_ADDR: usize = BASEK * 4;            // Ram address (GGSW) Torus precision.		
+const K_ADDR: usize = BASEK * 4;            // Ram address (GGSW) Torus precision.
 const K_EVK: usize = BASEK * 5;             // Ram evaluation keys (GGLWE) Torus precision
 const XS: f64 = 0.5;                        // Secret-key distribution.
 const XE: f64 = 3.2;                        // Noise standard deviation.
@@ -28,7 +28,7 @@ const MAX_ADDR: usize = 1 << 18;
 
 For a RAM-size of 2^18 with 4xu8 words, the above parameterization enables 450ms read and 1200ms write (i9-12900K single thread) with at least ~40mio read/write without having to refresh the RAM.
 
-### Security 
+### Security
 
 The above paramterization offers ~168 bits of security.
 
@@ -63,17 +63,38 @@ This example requires a local installation of [Poulpy](https://github.com/phanto
 git clone https://github.com/phantomzone-org/poulpy ../poulpy
 ```
 
-2. Build the [spqlios-arithmetic](https://github.com/phantomzone-org/spqlios-arithmetic) backend:
+2. Navigate to poulpy and initialise [spqlios-arithmetic](https://github.com/phantomzone-org/spqlios-arithmetic) as a submodule inside `backend`:
 
 ```bash
-cd ../poulpy/backend/spqlios-arithmetic
-mkdir build && cd build
-cmake ..
-make
+cd ../poulpy
+git submodule update --init --recursive
 ```
 
-> ⚠️ These steps assume a Linux environment. For other platforms, refer to the [spqlios-arithmetic build guide](https://github.com/tfhe/spqlios-arithmetic/wiki/build).
+3. Build [spqlios-arithmetic](https://github.com/phantomzone-org/spqlios-arithmetic):
 
+On linux:
+
+```bash
+# at parent directory
+cd ./poulpy/backend/spqlios-arithmetic
+mkdir build && cd build
+cmake .. -DENABLE_TESTING=off
+make -j
+cd ../../../../ # back to parent directory
+```
+
+On macos
+
+```bash
+# at parent directory
+cd ./poulpy/backend/spqlios-arithmetic
+mkdir build && cd build
+cmake .. -DENABLE_TESTING=off -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++"
+make -j
+
+cd spqlios && rm -rf *.dylib* && cd ..
+cd ../../../../ # back to parent directory
+```
 
 ## Running the Example
 
@@ -87,14 +108,11 @@ cargo run --release --example fhe-ram
 
 This is **research code**, not production software. It is intended for experimentation and validation of encrypted memory concepts.
 
-
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
 
-
 ## Citing
-
 
 ```
 @misc{fhe-ram,
