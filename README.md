@@ -2,7 +2,7 @@
 
 This repository demonstrates how [Poulpy](https://github.com/phantomzone-org/poulpy), a modular and high-performance lattice-based FHE library, can be used to implement fully homomorphic encrypted read/write RAM.
 
-The FHE-RAM example use a combination of GLWE, GGLWE and GGSW ciphertext operations to provide encrypted read/write access on an encrypted database using encrypted address.
+The FHE-RAM example uses a combination of GLWE, GGLWE and GGSW ciphertext operations to provide encrypted read/write access on an encrypted database using encrypted address.
 
 ## Parameterization & Performance
 
@@ -26,11 +26,11 @@ const WORDSIZE: usize = 4;
 const MAX_ADDR: usize = 1 << 18;
 ```
 
-For a RAM-size of 2^18 with 4xu8 words (equivalent to 1MB), the above parameterization enables 450ms read and 1200ms write (i9-12900K single thread) with at least ~40mio read/write without having to refresh the RAM.
+For a RAM-size of 2^18 entries, with each entry a 4xu8 word (i.e. RAM size is 1MB), the above parameterization enables 450ms read and 1200ms write (i9-12900K single thread) with at least ~40mio read/write without having to refresh the RAM.
 
 ### Security
 
-The above paramterization offers ~168 bits of security.
+The above paramterization offers ~168 bits of security. 
 
 ```
 from estimator import *
@@ -83,7 +83,7 @@ make -j
 cd ../../../../ # back to parent directory
 ```
 
-On macos
+On macos:
 
 ```bash
 # at parent directory
@@ -110,7 +110,7 @@ cargo run --release --example fhe-ram
 // Global public parameters (e.g. cryptographic parameters)
 let params = Parameters::new();
 
-// Word-size, i.e. how many chuncks of K_PT bits a word is made of.
+// Word-size, i.e. how many chunks of K_PT bits a word is made of.
 // By default WORDSIZE=4 chunks of K_PT=8 bits, i.e. 32bit words.
 let ws = params.word_size();
     
@@ -120,13 +120,13 @@ let max_addr = params.max_addr();
 
 // Generates a new secret along with the (public) evaluation key (evk).
 // The evaluation key comprises log(N) automorphism keys (GGLWE) as well
-// as the tensor key (rank choose 2 GGLWE), a.k.a relinearization key.
+// as the tensor key (rank choice 2 GGLWE), a.k.a relinearization key.
 let (sk, evk) = gen_keys(&params);
 
 // Create a new FHE-RAM instance.
 let mut ram = Ram::new();
 
-// Encrypt an array of bytes of size WORDSIZE * MAX_ADDR as vector of GLWE.
+// Encrypt an array of bytes of length WORDSIZE * MAX_ADDR as vector of GLWE.
 ram.encrypt_sk(&data, &sk);
 
 // Allocates a new encrypted address (matrix of GGSW).
@@ -136,14 +136,14 @@ let mut addr: Address = Address::alloc(&params);
 addr.encrypt_sk(&params, idx, &sk);
 
 // Read from the encrypted RAM at the encrypted address.
-// Returns a vector of GLWE of size WORDSIZE.
+// Returns a vector of GLWE of length WORDSIZE.
 let ct = ram.read(&addr, &keys);
 
-// Same as read, but enables a subsequent read.
+// Same as read, but prepares the state for a subsequent write.
 let ct = ram.read_prepare_write(&addr, &keys);
 
 // Writes encrypted bytes to the encrypted RAM at the encrypted address.
-// Takes as input a vector of GLWE of size WORDSIZE.
+// Takes as input a vector of GLWE of length WORDSIZE.
 ram.write(&ct_w, &addr, &keys); 
 ```
 
