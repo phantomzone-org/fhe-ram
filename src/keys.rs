@@ -33,9 +33,7 @@ pub fn gen_keys(params: &Parameters) -> (GLWESecret<Vec<u8>, FFT64>, EvaluationK
     sk.fill_ternary_prob(&module, params.xs(), &mut source_1);
 
     let gal_els: Vec<i64> = GLWECiphertext::trace_galois_elements(&module);
-
-    let mut auto_keys: HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>> = HashMap::new();
-    gal_els.iter().for_each(|gal_el| {
+    let auto_keys = HashMap::from_iter(gal_els.iter().map(|gal_el| {
         let mut key: AutomorphismKey<Vec<u8>, FFT64> =
             AutomorphismKey::alloc(&module, basek, k_evk, rows, rank);
         key.generate_from_sk(
@@ -47,8 +45,8 @@ pub fn gen_keys(params: &Parameters) -> (GLWESecret<Vec<u8>, FFT64>, EvaluationK
             params.xe(),
             scratch.borrow(),
         );
-        auto_keys.insert(*gal_el, key);
-    });
+        (*gal_el, key)
+    }));
 
     let mut tensor_key = TensorKey::alloc(module, basek, k_evk, rows, rank);
     tensor_key.generate_from_sk(
@@ -60,8 +58,11 @@ pub fn gen_keys(params: &Parameters) -> (GLWESecret<Vec<u8>, FFT64>, EvaluationK
         scratch.borrow(),
     );
 
-    (sk, EvaluationKeys {
-        auto_keys,
-        tensor_key,
-    })
+    (
+        sk,
+        EvaluationKeys {
+            auto_keys,
+            tensor_key,
+        },
+    )
 }
