@@ -1,21 +1,23 @@
 use backend::{FFT64, Module};
 
 const LOG_N: usize = 12;
-const BASEK: usize = 17;
+const BASEK: usize = 20;
 const RANK: usize = 1;
 const K_PT: usize = u8::BITS as usize;
-const K_CT: usize = BASEK * 3;
+const K_CT: usize = BASEK * 2;
 const K_ADDR: usize = BASEK * 4;
-const K_EVK: usize = BASEK * 5;
+const K_EVK: usize = BASEK * 4;
 const XS: f64 = 0.5;
 const XE: f64 = 3.2;
-pub const DECOMP_N: [u8; 2] = [6, 6];
+pub const DECOMP_N: [u8; 1] = [12];
 const WORDSIZE: usize = 4;
-const MAX_ADDR: usize = 1 << 18;
+const MAX_ADDR: usize = 1 << 20;
+const DIGITS: usize = 1;
 
 pub struct Parameters {
     module: Module<FFT64>, // FFT/NTT tables.
     basek: usize,          // Torus 2^{-k} decomposition.
+    digits: usize,         // Digits of GGLWE/GGSW product
     rank: usize,           // GLWE/GGLWE/GGSW rank.
     k_pt: usize,           // Ram plaintext (GLWE) Torus precision.
     k_ct: usize,           // Ram ciphertext (GLWE) Torus precision.
@@ -35,6 +37,7 @@ impl Parameters {
         Self {
             module: Module::<FFT64>::new(1 << LOG_N),
             basek: BASEK,
+            digits: DIGITS,
             rank: RANK,
             k_ct: K_CT,
             k_pt: K_PT,
@@ -82,6 +85,10 @@ impl Parameters {
 
     pub fn word_size(&self) -> usize {
         self.word_size
+    }
+
+    pub(crate) fn digits(&self) -> usize {
+        self.digits
     }
 
     pub(crate) fn k_evk(&self) -> usize {

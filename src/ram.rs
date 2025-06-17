@@ -43,12 +43,13 @@ impl Ram {
         let k_evk: usize = params.k_evk();
         let basek: usize = params.basek();
         let rank: usize = params.rank();
+        let digits: usize = params.digits();
 
         let enc_sk: usize = GLWECiphertext::encrypt_sk_scratch_space(module, basek, k_ct);
         let coordinate_product: usize = Coordinate::product_scratch_space(params);
-        let packing: usize = StreamPacker::scratch_space(module, basek, k_ct, k_evk, rank);
+        let packing: usize = StreamPacker::scratch_space(module, basek, k_ct, k_evk, digits, rank);
         let trace: usize =
-            GLWECiphertext::trace_inplace_scratch_space(module, basek, k_ct, k_evk, rank);
+            GLWECiphertext::trace_inplace_scratch_space(module, basek, k_ct, k_evk, digits, rank);
         let ct: usize = GLWECiphertext::bytes_of(module, basek, k_ct, rank);
         let inv_addr: usize = Coordinate::invert_scratch_space(params);
 
@@ -154,6 +155,7 @@ impl Ram {
         let module: &Module<FFT64> = &params.module();
         let basek: usize = params.basek();
         let rank: usize = params.rank();
+        let digits: usize = params.digits();
 
         let scratch: &mut Scratch = self.scratch.borrow();
         let auto_keys: &HashMap<i64, AutomorphismKey<Vec<u8>, FFT64>> = &keys.auto_keys;
@@ -174,6 +176,7 @@ impl Ram {
                 address.k(),
                 address.rows(),
                 rank,
+                digits,
                 &coordinate.base1d.clone(),
             ); // DODO ALLOC FROM SCRATCH SPACE
 
@@ -201,6 +204,7 @@ impl Ram {
             address.k(),
             address.rows(),
             rank,
+            digits,
             &coordinate.base1d.clone(),
         ); // DODO ALLOC FROM SCRATCH SPACE
 
@@ -236,7 +240,7 @@ impl SubRam {
 
         let n: usize = module.n();
         let mut tree: Vec<Vec<GLWECiphertext<Vec<u8>>>> = Vec::new();
-        let max_addr_split: usize = params.max_addr() >> 2; // u8 -> u32
+        let max_addr_split: usize = params.max_addr(); // u8 -> u32
 
         if max_addr_split > n {
             let mut size: usize = (max_addr_split + n - 1) / n;

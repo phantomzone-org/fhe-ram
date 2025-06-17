@@ -32,12 +32,13 @@ impl Address {
         let k: usize = params.k_addr();
         let rows: usize = params.rows_ct();
         let rank: usize = params.rank();
+        let digits: usize = params.digits();
 
         Self {
             coordinates: base_2d
                 .0
                 .iter()
-                .map(|base1d| Coordinate::alloc(module, basek, k, rows, rank, base1d))
+                .map(|base1d| Coordinate::alloc(module, basek, k, rows, rank, digits, base1d))
                 .collect(),
             k,
             rows,
@@ -121,13 +122,14 @@ impl Coordinate<Vec<u8>> {
         k: usize,
         rows: usize,
         rank: usize,
+        digits: usize,
         base1d: &Base1D,
     ) -> Self {
         Self {
             value: base1d
                 .0
                 .iter()
-                .map(|_| GGSWCiphertext::alloc(module, basek, k, rows, rank))
+                .map(|_| GGSWCiphertext::alloc(module, basek, k, rows, digits, rank))
                 .collect(),
             base1d: base1d.clone(),
         }
@@ -141,8 +143,10 @@ impl Coordinate<Vec<u8>> {
             params.k_addr(), // Output GGSW Torus precision.
             params.k_addr(), // Input GGSW Torus precision.
             params.k_evk(),  // Automorphism GLWE Torus precision.
-            params.k_evk(),  // Tensor GLWE Torus precision.
-            params.rank(),   // GLWE/GGLWE/GGSW rank.
+            params.digits(),
+            params.k_evk(), // Tensor GLWE Torus precision.
+            params.digits(),
+            params.rank(), // GLWE/GGLWE/GGSW rank.
         )
     }
 
@@ -154,13 +158,15 @@ impl Coordinate<Vec<u8>> {
             params.k_ct(),   // Output GLWE Torus precision.
             params.k_ct(),   // Input GLWE Torus precision.
             params.k_addr(), // Address GGSW Torus precision.
-            params.rank(),   // GLWE/GGSW rank.
+            params.digits(),
+            params.rank(), // GLWE/GGSW rank.
         ) | GLWECiphertext::external_product_inplace_scratch_space(
             params.module(), // FFT/NTT Tables.
             params.basek(),  // Torus base 2 decomposition.
             params.k_ct(),   // Input/Output GLWE Torus precision.
             params.k_addr(), // Address GGSW Torus precision.
-            params.rank(),   // GLWE/GGSW rank.
+            params.digits(),
+            params.rank(), // GLWE/GGSW rank.
         )
     }
 }
