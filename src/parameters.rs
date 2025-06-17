@@ -11,7 +11,7 @@ const XS: f64 = 0.5;
 const XE: f64 = 3.2;
 pub const DECOMP_N: [u8; 1] = [12];
 const WORDSIZE: usize = 4;
-const MAX_ADDR: usize = 1 << 20;
+const MAX_ADDR: usize = 1 << 18;
 const DIGITS: usize = 1;
 
 pub struct Parameters {
