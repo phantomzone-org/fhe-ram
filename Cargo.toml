@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-core = { path = "../poulpy/core" }
-backend = { path = "../poulpy/backend" }
-sampling = { path = "../poulpy/sampling" }
+poulpy-schemes = { path = "../poulpy/poulpy-schemes" }
+poulpy-core = { path = "../poulpy/poulpy-core" }
+poulpy-backend = { path = "../poulpy/poulpy-backend" }
+poulpy-hal = { path = "../poulpy/poulpy-hal" }
 rand_core = "0.9.3"
 itertools = "0.14.0"

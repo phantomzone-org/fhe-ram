@@ -1,8 +1,19 @@
-use core::{AutomorphismKey, GGSWCiphertext, GLWECiphertext, GLWESecret, TensorKey};
-
-use backend::{FFT64, Module, Scratch, ScratchOwned, ZnxViewMut};
 use itertools::izip;
-use sampling::source::{Source, new_seed};
+
+use poulpy_backend::FFT64Spqlios;
+use poulpy_core::layouts::{
+    GGSWCiphertext, GLWECiphertext,
+    prepared::{
+        GGLWEAutomorphismKeyPrepared, GGLWETensorKeyPrepared, GGSWCiphertextPrepared,
+        GLWESecretPrepared, PrepareAlloc,
+    },
+};
+use poulpy_hal::{
+    api::{ScratchOwnedAlloc, ScratchOwnedBorrow, TakeScalarZnx},
+    layouts::{Data, Module, Scratch, ScratchOwned, ZnxViewMut},
+    source::Source,
+};
+use rand_core::{OsRng, TryRngCore};
 
 use crate::parameters::Parameters;
 
@@ -27,7 +38,7 @@ impl Address {
         let decomp_n: Vec<u8> = params.decomp_n();
 
         let base_2d: Base2D = get_base_2d(max_addr as u32, decomp_n);
-        let module: &Module<FFT64> = &params.module();
+        let module: &Module<FFT64Spqlios> = params.module();
         let basek: usize = params.basek();
         let k: usize = params.k_addr();
         let rows: usize = params.rows_ct();
@@ -47,21 +58,33 @@ impl Address {
     }
 
     /// Encrypts an u32 value into an [Address] under the provided secret.
-    pub fn encrypt_sk(&mut self, params: &Parameters, value: u32, sk: &GLWESecret<Vec<u8>, FFT64>) {
+    pub fn encrypt_sk<DataSk: Data + AsRef<[u8]>>(
+        &mut self,
+        params: &Parameters,
+        value: u32,
+        sk: &GLWESecretPrepared<DataSk, FFT64Spqlios>,
+    ) {
         debug_assert!(self.base2d.max() > value as usize);
 
-        let module: &Module<FFT64> = params.module();
+        let module: &Module<FFT64Spqlios> = params.module();
         let basek: usize = params.basek();
         let rank: usize = params.rank();
         let k: usize = params.k_addr();
-        let sigma: f64 = params.xe();
 
-        let mut scratch: ScratchOwned = ScratchOwned::new(
+        let mut scratch: ScratchOwned<FFT64Spqlios> = ScratchOwned::alloc(
             GGSWCiphertext::encrypt_sk_scratch_space(module, basek, k, rank),
         );
 
-        let mut source_xa: Source = Source::new(new_seed());
-        let mut source_xe: Source = Source::new(new_seed());
+        let mut root = [0u8; 32];
+        OsRng.try_fill_bytes(&mut root).unwrap();
+
+        let mut source: Source = Source::new(root);
+
+        let seed_xa = source.new_seed();
+        let mut source_xa = Source::new(seed_xa);
+
+        let seed_xe = source.new_seed();
+        let mut source_xe = Source::new(seed_xe);
 
         let mut remain: usize = value as _;
         izip!(self.coordinates.iter_mut(), self.base2d.0.iter()).for_each(|(coordinate, base1d)| {
@@ -70,10 +93,9 @@ impl Address {
             coordinate.encrypt_sk(
                 -(k as i64),
                 module,
-                &sk,
+                sk,
                 &mut source_xa,
                 &mut source_xe,
-                sigma,
                 scratch.borrow(),
             );
             remain /= max;
@@ -101,8 +123,8 @@ impl Address {
 /// This provides a second decomposition over the one in base N to
 /// to ensure that the digits are small enough to enable HE operation
 /// over the digits (e.g. 2-4 bits digits instead of log(N)-bits digits).
-pub(crate) struct Coordinate<D> {
-    pub(crate) value: Vec<GGSWCiphertext<D, FFT64>>,
+pub(crate) struct Coordinate<D: Data> {
+    pub(crate) value: Vec<GGSWCiphertext<D>>,
     pub(crate) base1d: Base1D,
 }
 
@@ -117,7 +139,7 @@ impl Coordinate<Vec<u8>> {
     /// * `rank`: rank of the GLWE/GGLE/GGSW ciphertexts.
     /// * `base1d`: digit decomposition of the coordinate (e.g. [12], [6, 6], [4, 4, 4] or [3, 3, 3, 3] for LogN = 12).
     pub(crate) fn alloc(
-        module: &Module<FFT64>,
+        module: &Module<FFT64Spqlios>,
         basek: usize,
         k: usize,
         rows: usize,
@@ -129,7 +151,7 @@ impl Coordinate<Vec<u8>> {
             value: base1d
                 .0
                 .iter()
-                .map(|_| GGSWCiphertext::alloc(module, basek, k, rows, digits, rank))
+                .map(|_| GGSWCiphertext::alloc(module.n(), basek, k, rows, digits, rank))
                 .collect(),
             base1d: base1d.clone(),
         }
@@ -171,7 +193,7 @@ impl Coordinate<Vec<u8>> {
     }
 }
 
-impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
+impl<D: Data + AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
     /// Encrypts a value in [-N+1, N-1] as GGSW(X^{value}).
     ///
     /// # Arguments
@@ -183,25 +205,24 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
     /// * `source_xe`: random coins generator for noise.
     /// * `sigma`: standard deviation of the noise.
     /// * `scratch`: scratch space provider.
-    pub(crate) fn encrypt_sk<DataSk: AsRef<[u8]>>(
+    pub(crate) fn encrypt_sk<DataSk: Data + AsRef<[u8]>>(
         &mut self,
         value: i64,
-        module: &Module<FFT64>,
-        sk: &GLWESecret<DataSk, FFT64>,
+        module: &Module<FFT64Spqlios>,
+        sk: &GLWESecretPrepared<DataSk, FFT64Spqlios>,
         source_xa: &mut Source,
         source_xe: &mut Source,
-        sigma: f64,
-        scratch: &mut Scratch,
+        scratch: &mut Scratch<FFT64Spqlios>,
     ) {
         let n: usize = module.n();
 
         assert!(value.abs() < n as i64);
 
-        let (mut scalar, scratch1) = scratch.tmp_scalar_znx(module, 1);
+        let (mut scalar, scratch1) = scratch.take_scalar_znx(module.n(), 1);
         let sign: i64 = value.signum();
         let gap: usize = 1; // self.base1d.gap(module.log_n());
 
-        let mut remain: usize = value.abs() as usize;
+        let mut remain: usize = value.unsigned_abs() as usize;
         let mut tot_base: u8 = 0;
 
         izip!(self.value.iter_mut(), self.base1d.0.iter()).for_each(|(coordinate, base)| {
@@ -215,7 +236,7 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
                 scalar.raw_mut()[chunk] = 1;
             }
 
-            coordinate.encrypt_sk(module, &scalar, sk, source_xa, source_xe, sigma, scratch1);
+            coordinate.encrypt_sk(module, &scalar, sk, source_xa, source_xe, scratch1);
 
             if sign < 0 && chunk != 0 {
                 scalar.raw_mut()[n - chunk] = 0;
@@ -230,20 +251,24 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
 
     /// Maps GGSW(X^{i}) to GGSW(X^{-i}).
     ///
-    /// #Arguments
+    /// # Arguments
     ///
     /// * `module`: FFT/NTT tables.
     /// * `other`: coordinate to invert.
     /// * `auto_key`: GGLWE(AUTO(s, -1)).
     /// * `tensor_key`: GGLWE(TENSOR(s)).
     /// * `scratch`: scratch space provider.
-    pub(crate) fn invert<DataOther: AsRef<[u8]>, DataAK: AsRef<[u8]>, DataTK: AsRef<[u8]>>(
+    pub(crate) fn invert<
+        DataOther: Data + AsRef<[u8]>,
+        DataAK: Data + AsRef<[u8]>,
+        DataTK: Data + AsRef<[u8]>,
+    >(
         &mut self,
-        module: &Module<FFT64>,
+        module: &Module<FFT64Spqlios>,
         other: &Coordinate<DataOther>,
-        auto_key: &AutomorphismKey<DataAK, FFT64>,
-        tensor_key: &TensorKey<DataTK, FFT64>,
-        scratch: &mut Scratch,
+        auto_key: &GGLWEAutomorphismKeyPrepared<DataAK, FFT64Spqlios>,
+        tensor_key: &GGLWETensorKeyPrepared<DataTK, FFT64Spqlios>,
+        scratch: &mut Scratch<FFT64Spqlios>,
     ) {
         assert!(auto_key.p() == -1);
         assert_eq!(
@@ -261,33 +286,37 @@ impl<D: AsMut<[u8]> + AsRef<[u8]>> Coordinate<D> {
     }
 }
 
-impl<D: AsRef<[u8]>> Coordinate<D> {
+impl<D: Data + AsRef<[u8]>> Coordinate<D> {
     /// Evaluates GLWE(m) * GGSW(X^i).
-    pub(crate) fn product<DataRes: AsMut<[u8]> + AsRef<[u8]>, DataA: AsRef<[u8]>>(
+    pub(crate) fn product<DataRes: Data + AsMut<[u8]> + AsRef<[u8]>, DataA: Data + AsRef<[u8]>>(
         &self,
-        module: &Module<FFT64>,
+        module: &Module<FFT64Spqlios>,
         res: &mut GLWECiphertext<DataRes>,
         a: &GLWECiphertext<DataA>,
-        scratch: &mut Scratch,
+        scratch: &mut Scratch<FFT64Spqlios>,
     ) {
         self.value.iter().enumerate().for_each(|(i, coordinate)| {
+            let ct_rhs_prepared: GGSWCiphertextPrepared<Vec<u8>, FFT64Spqlios> =
+                coordinate.prepare_alloc(module, scratch);
             if i == 0 {
-                res.external_product(module, a, coordinate, scratch);
+                res.external_product(module, a, &ct_rhs_prepared, scratch);
             } else {
-                res.external_product_inplace(module, coordinate, scratch);
+                res.external_product_inplace(module, &ct_rhs_prepared, scratch);
             }
         });
     }
 
     /// Evaluates GLWE(m) * GGSW(X^i).
-    pub(crate) fn product_inplace<DataRes: AsMut<[u8]> + AsRef<[u8]>>(
+    pub(crate) fn product_inplace<DataRes: Data + AsMut<[u8]> + AsRef<[u8]>>(
         &self,
-        module: &Module<FFT64>,
+        module: &Module<FFT64Spqlios>,
         res: &mut GLWECiphertext<DataRes>,
-        scratch: &mut Scratch,
+        scratch: &mut Scratch<FFT64Spqlios>,
     ) {
         self.value.iter().for_each(|coordinate| {
-            res.external_product_inplace(module, coordinate, scratch);
+            let ct_rhs_prepared: GGSWCiphertextPrepared<Vec<u8>, FFT64Spqlios> =
+                coordinate.prepare_alloc(module, scratch);
+            res.external_product_inplace(module, &ct_rhs_prepared, scratch);
         });
     }
 }
@@ -323,7 +352,7 @@ impl Base1D {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn recomp(&self, decomp: &Vec<u8>) -> u32 {
+    pub(crate) fn recomp(&self, decomp: &[u8]) -> u32 {
         let mut value: u32 = 0;
         let mut sum_bases: u8 = 0;
         self.0.iter().enumerate().for_each(|(i, base)| {
@@ -347,7 +376,7 @@ impl Base2D {
         Base1D(
             self.0
                 .iter()
-                .flat_map(|array| array.0.iter().map(|&x| x))
+                .flat_map(|array| array.0.iter().copied())
                 .collect(),
         )
     }
@@ -358,7 +387,7 @@ impl Base2D {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn recomp(&self, decomp: &Vec<u8>) -> u32 {
+    pub(crate) fn recomp(&self, decomp: &[u8]) -> u32 {
         self.as_1d().recomp(decomp)
     }
 }

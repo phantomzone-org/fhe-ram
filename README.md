@@ -108,7 +108,7 @@ cargo run --release --example fhe-ram
 
 ```rust
 // Global public parameters (e.g. cryptographic parameters)
-let params = Parameters::new();
+let params = Parameters::default();
 
 // Word-size, i.e. how many chunks of K_PT bits a word is made of.
 // By default WORDSIZE=4 chunks of K_PT=8 bits, i.e. 32bit words.
@@ -124,7 +124,7 @@ let max_addr = params.max_addr();
 let (sk, evk) = gen_keys(&params);
 
 // Create a new FHE-RAM instance.
-let mut ram = Ram::new();
+let mut ram = Ram::default();
 
 // Encrypt an array of bytes of length WORDSIZE * MAX_ADDR as vector of GLWE.
 ram.encrypt_sk(&data, &sk);
