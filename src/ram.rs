@@ -329,7 +329,7 @@ impl SubRam {
         scratch: &mut Scratch<FFT64Avx>,
     ) -> GLWECiphertext<Vec<u8>> {
         assert!(
-            self.state,
+            !self.state,
             "invalid call to Memory.read: internal state is true -> requires calling Memory.write"
         );
 
@@ -399,7 +399,7 @@ impl SubRam {
         scratch: &mut Scratch<FFT64Avx>,
     ) -> GLWECiphertext<Vec<u8>> {
         assert!(
-            self.state,
+            !self.state,
             "invalid call to Memory.read: internal state is true -> requires calling Memory.write"
         );
 
