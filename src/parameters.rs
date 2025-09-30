@@ -1,8 +1,5 @@
 use poulpy_backend::cpu_fft64_avx::FFT64Avx;
-use poulpy_hal::{
-    api::ModuleNew,
-    layouts::Module,
-};
+use poulpy_hal::{api::ModuleNew, layouts::Module};
 
 const LOG_N: usize = 12;
 const BASEK: usize = 17;
@@ -20,18 +17,24 @@ const DIGITS: usize = 1;
 
 pub struct Parameters {
     module: Module<FFT64Avx>, // FFT/NTT tables.
-    basek: usize,          // Torus 2^{-k} decomposition.
-    digits: usize,         // Digits of GGLWE/GGSW product
-    rank: usize,           // GLWE/GGLWE/GGSW rank.
-    k_pt: usize,           // Ram plaintext (GLWE) Torus precision.
-    k_ct: usize,           // Ram ciphertext (GLWE) Torus precision.
-    k_addr: usize,         // Ram address (GGSW) Torus precision.
-    k_evk: usize,          // Ram evaluation keys (GGLWE) Torus precision
-    xs: f64,               // Secret-key distribution.
-    xe: f64,               // Noise standard deviation.
-    max_addr: usize,       // Maximum supported address.
-    decomp_n: Vec<u8>,     // Digit decomposition of N.
-    word_size: usize,      // Digit decomposition of a Ram word.
+    basek: usize,             // Torus 2^{-k} decomposition.
+    digits: usize,            // Digits of GGLWE/GGSW product
+    rank: usize,              // GLWE/GGLWE/GGSW rank.
+    k_pt: usize,              // Ram plaintext (GLWE) Torus precision.
+    k_ct: usize,              // Ram ciphertext (GLWE) Torus precision.
+    k_addr: usize,            // Ram address (GGSW) Torus precision.
+    k_evk: usize,             // Ram evaluation keys (GGLWE) Torus precision
+    xs: f64,                  // Secret-key distribution.
+    xe: f64,                  // Noise standard deviation.
+    max_addr: usize,          // Maximum supported address.
+    decomp_n: Vec<u8>,        // Digit decomposition of N.
+    word_size: usize,         // Digit decomposition of a Ram word.
+}
+
+impl Default for Parameters {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Parameters {
@@ -104,11 +107,11 @@ impl Parameters {
     }
 
     pub(crate) fn rows_ct(&self) -> usize {
-        (self.k_ct() + self.basek() - 1) / self.basek()
+        self.k_ct().div_ceil(self.basek())
     }
 
     pub(crate) fn rows_addr(&self) -> usize {
-        (self.k_addr() + self.basek() - 1) / self.basek()
+        self.k_addr().div_ceil(self.basek())
     }
 
     pub(crate) fn decomp_n(&self) -> Vec<u8> {

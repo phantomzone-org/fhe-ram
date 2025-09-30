@@ -1,29 +1,14 @@
-// use core::{GLWECiphertext, GLWEPlaintext, GLWESecret, Infos};
-use std::time::{Instant, SystemTime};
-
-// use backend::{Decoding, Encoding, FFT64, Module, ScratchOwned};
-// use itertools::Itertools;
-// use rand_core::RngCore;
-// use sampling::source::{Source, new_seed};
-
-// use std::collections::HashMap;
-
-// use backend::{Encoding, FFT64, Module, Scratch, ScratchOwned};
-// use itertools::izip;
-// use sampling::source::{Source, new_seed};
-
 use poulpy_backend::FFT64Avx;
+use std::time::Instant;
 
+use poulpy_core::layouts::{
+    GLWECiphertext, GLWEPlaintext, GLWESecret, Infos,
+    prepared::{GLWESecretPrepared, PrepareAlloc},
+};
 use poulpy_hal::{
     api::{ScratchOwnedAlloc, ScratchOwnedBorrow},
-    layouts::{Module, ScratchOwned, ZnxView},
+    layouts::{Module, ScratchOwned},
     source::Source,
-};
-use poulpy_core::{
-    layouts::{
-        prepared::{GLWESecretPrepared, PrepareAlloc},
-        GLWECiphertext, GLWEPlaintext, GLWESecret, Infos,
-    },
 };
 
 use fhe_ram::{address::Address, keys::gen_keys, parameters::Parameters, ram::Ram};
@@ -38,13 +23,8 @@ fn main() {
     // Generates a new secret-key along with the public evaluation keys.
     let (sk, keys) = gen_keys(&params);
 
-    // Some randomness
-    // let mut source: Source = Source::new([5u8; 32]); // use the time as seed
-    use std::time::UNIX_EPOCH;
-    let mut seed = [0u8; 32];
-    let time_bytes = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_le_bytes();
-    seed[..8].copy_from_slice(&time_bytes);
-    let mut source: Source = Source::new(seed);
+    // Some deterministic randomness
+    let mut source: Source = Source::new([5u8; 32]);
 
     // Word-size
     let ws: usize = params.word_size();
@@ -77,34 +57,38 @@ fn main() {
     // Checks correctness
     (0..ws).for_each(|i| {
         let want: i8 = data[i + ws * idx as usize] as i8;
-        let (decrypted_value, _noise) = decrypt_glwe(&params, &ct[i], want as u8, &sk);
+        let (decrypted_value, noise) = decrypt_glwe(&params, &ct[i], want as u8, &sk);
         assert_eq!(decrypted_value, want as i64);
-        // println!("noise: {}", noise);
-        // assert!(
-        //     noise < -(params.k_pt() as f64 + 1.0),
-        //     "{} >= {}",
-        //     noise,
-        //     (params.k_pt() as f64 + 1.0)
-        // );
+        println!("noise: {}", noise);
+        assert!(
+            noise < -(params.k_pt() as f64 + 1.0),
+            "{} >= {}",
+            noise,
+            (params.k_pt() as f64 + 1.0)
+        );
     });
 
     // Reads from the FHE-RAM (with preparing for write)
     let start: Instant = Instant::now();
     let ct: Vec<GLWECiphertext<Vec<u8>>> = ram.read_prepare_write(&addr, &keys);
     let duration: std::time::Duration = start.elapsed();
-    println!("READ_PREPARE_WRITE Elapsed time: {} ms", duration.as_millis());
+    println!(
+        "READ_PREPARE_WRITE Elapsed time: {} ms",
+        duration.as_millis()
+    );
 
     // Checks correctness
     (0..ws).for_each(|i| {
         let want: i8 = data[i + ws * idx as usize] as i8;
-        let (decrypted_value, _noise) = decrypt_glwe(&params, &ct[i], want as u8, &sk);
+        let (decrypted_value, noise) = decrypt_glwe(&params, &ct[i], want as u8, &sk);
         assert_eq!(decrypted_value, want as i64);
-        // assert!(
-        //     noise < -(params.k_pt() as f64 + 1.0),
-        //     "{} >= {}",
-        //     noise,
-        //     (params.k_pt() as f64 + 1.0)
-        // );
+        println!("noise: {}", noise);
+        assert!(
+            noise < -(params.k_pt() as f64 + 1.0),
+            "{} >= {}",
+            noise,
+            (params.k_pt() as f64 + 1.0)
+        );
     });
 
     // Value to write on the FHE-RAM
@@ -134,15 +118,15 @@ fn main() {
     // Checks correctness
     (0..ws).for_each(|i| {
         let want: i8 = data[i + ws * idx as usize] as i8;
-        let (have, _noise) = decrypt_glwe(&params, &ct[i], want as u8, &sk);
+        let (have, noise) = decrypt_glwe(&params, &ct[i], want as u8, &sk);
         assert_eq!(have, want as i64);
-        // println!("noise: {}", noise);
-        // assert!(
-        //     noise < -(params.k_pt() as f64 + 1.0),
-        //     "{} >= {}",
-        //     noise,
-        //     (params.k_pt() as f64 + 1.0)
-        // );
+        println!("noise: {}", noise);
+        assert!(
+            noise < -(params.k_pt() as f64 + 1.0),
+            "{} >= {}",
+            noise,
+            (params.k_pt() as f64 + 1.0)
+        );
     });
 }
 
@@ -160,14 +144,13 @@ fn encrypt_glwe(
     let mut pt_w: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(module.n(), basek, k_pt);
     pt_w.data
         .encode_coeff_i64(basek, 0, k_pt, 0, value as i64, u8::BITS as usize);
-    let mut scratch: ScratchOwned<FFT64Avx> = ScratchOwned::alloc(GLWECiphertext::encrypt_sk_scratch_space(
-        module,
-        basek,
-        ct_w.k(),
-    ));
+    let mut scratch: ScratchOwned<FFT64Avx> = ScratchOwned::alloc(
+        GLWECiphertext::encrypt_sk_scratch_space(module, basek, ct_w.k()),
+    );
     let mut source_xa: Source = Source::new([1u8; 32]); // TODO: Create from random seed
     let mut source_xe: Source = Source::new([1u8; 32]); // TODO: Create from random seed
-    let sk_glwe_prepared: GLWESecretPrepared<Vec<u8>, FFT64Avx> = sk.prepare_alloc(&module, scratch.borrow());
+    let sk_glwe_prepared: GLWESecretPrepared<Vec<u8>, FFT64Avx> =
+        sk.prepare_alloc(&module, scratch.borrow());
     ct_w.encrypt_sk(
         module,
         &pt_w,
@@ -190,18 +173,18 @@ fn decrypt_glwe(
     let k: usize = ct.k();
     let mut pt: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(module.n(), basek, k);
     let mut scratch: ScratchOwned<FFT64Avx> =
-        ScratchOwned::alloc(GLWECiphertext::decrypt_scratch_space(module, basek, ct.k())
-    );
-    
-    let sk_glwe_prepared: GLWESecretPrepared<Vec<u8>, FFT64Avx> = sk.prepare_alloc(&module, scratch.borrow());
-    ct.decrypt(module, &mut pt, &sk_glwe_prepared, scratch.borrow());
-    let decrypted_value = pt.data.at(0, 0)[0] / (1 << (basek as i64 - params.k_pt() as i64)); // TODO: Check if this is correct
-    let noise = ((pt.data.at(0, 0)[0] - want as i64) as f64).abs().log2();
-    
-    (decrypted_value, noise)
+        ScratchOwned::alloc(GLWECiphertext::decrypt_scratch_space(module, basek, ct.k()));
 
-    // let decrypted_value: i64 = pt.data.decode_coeff_i64(basek, 0, k, 0);
-    // let value = decrypted_value - ((want as i8) as i64) << (k - params.k_pt());
-    // let noise: f64 = ((value).abs() as f64).log2() - (k as f64);
-    // (decrypted_value, noise)
+    let sk_glwe_prepared: GLWESecretPrepared<Vec<u8>, FFT64Avx> =
+        sk.prepare_alloc(&module, scratch.borrow());
+    ct.decrypt(module, &mut pt, &sk_glwe_prepared, scratch.borrow());
+
+    let log_scale: usize = k - params.k_pt();
+    let decrypted_value: i64 = pt.data.decode_coeff_i64(basek, 0, k, 0);
+    let diff: i64 = decrypted_value - (((want as i8) as i64) << log_scale);
+    let noise: f64 = (diff.abs() as f64).log2() - k as f64;
+    (
+        (decrypted_value as f64 / f64::exp2(log_scale as f64)).round() as i64,
+        noise,
+    )
 }
