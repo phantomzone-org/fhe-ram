@@ -92,7 +92,7 @@ pub fn gen_keys(params: &Parameters) -> (GLWESecret<Vec<u8>>, EvaluationKeys) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use poulpy_core::layouts::{GLWECiphertext, GLWEPlaintext, prepared::PrepareAlloc};
+    use poulpy_core::layouts::{prepared::PrepareAlloc, GGLWECiphertext, GLWECiphertext, GLWEPlaintext};
     use poulpy_hal::{
         api::{ScratchOwnedBorrow, VecZnxAutomorphismInplace, VecZnxCopy},
         layouts::ScratchOwned,
@@ -135,7 +135,8 @@ mod tests {
             .encode_vec_i64(basek, 0, k_pt, &pt_data, u8::BITS as usize);
 
         let mut scratch: ScratchOwned<FFT64Avx> = ScratchOwned::alloc(
-            GGLWEAutomorphismKey::encrypt_sk_scratch_space(module, basek, k_ct, rank),
+            GGLWEAutomorphismKey::encrypt_sk_scratch_space(module, basek, k_ct, rank)
+            | GLWECiphertext::encrypt_sk_scratch_space(module, basek, k_ct)
         );
         let sk_prepared: GLWESecretPrepared<Vec<u8>, FFT64Avx> =
             sk.prepare_alloc(module, scratch.borrow());
