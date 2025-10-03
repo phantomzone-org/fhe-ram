@@ -1,4 +1,3 @@
-use poulpy_backend::FFT64Avx;
 use std::time::Instant;
 
 use poulpy_core::layouts::{
@@ -11,7 +10,7 @@ use poulpy_hal::{
     source::Source,
 };
 
-use fhe_ram::{address::Address, keys::gen_keys, parameters::Parameters, ram::Ram};
+use fhe_ram::{BackendImpl, address::Address, keys::gen_keys, parameters::Parameters, ram::Ram};
 use rand_core::RngCore;
 
 fn main() {
@@ -135,7 +134,7 @@ fn encrypt_glwe(
     value: u8,
     sk: &GLWESecret<Vec<u8>>,
 ) -> GLWECiphertext<Vec<u8>> {
-    let module: &Module<FFT64Avx> = params.module();
+    let module: &Module<BackendImpl> = params.module();
     let basek: usize = params.basek();
     let k_ct: usize = params.k_ct();
     let k_pt: usize = params.k_pt();
@@ -144,12 +143,12 @@ fn encrypt_glwe(
     let mut pt_w: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(module.n(), basek, k_pt);
     pt_w.data
         .encode_coeff_i64(basek, 0, k_pt, 0, value as i64, u8::BITS as usize);
-    let mut scratch: ScratchOwned<FFT64Avx> = ScratchOwned::alloc(
+    let mut scratch: ScratchOwned<BackendImpl> = ScratchOwned::alloc(
         GLWECiphertext::encrypt_sk_scratch_space(module, basek, ct_w.k()),
     );
     let mut source_xa: Source = Source::new([1u8; 32]); // TODO: Create from random seed
     let mut source_xe: Source = Source::new([1u8; 32]); // TODO: Create from random seed
-    let sk_glwe_prepared: GLWESecretPrepared<Vec<u8>, FFT64Avx> =
+    let sk_glwe_prepared: GLWESecretPrepared<Vec<u8>, BackendImpl> =
         sk.prepare_alloc(&module, scratch.borrow());
     ct_w.encrypt_sk(
         module,
@@ -168,14 +167,14 @@ fn decrypt_glwe(
     want: u8,
     sk: &GLWESecret<Vec<u8>>,
 ) -> (i64, f64) {
-    let module: &Module<FFT64Avx> = params.module();
+    let module: &Module<BackendImpl> = params.module();
     let basek: usize = params.basek();
     let k: usize = ct.k();
     let mut pt: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(module.n(), basek, k);
-    let mut scratch: ScratchOwned<FFT64Avx> =
+    let mut scratch: ScratchOwned<BackendImpl> =
         ScratchOwned::alloc(GLWECiphertext::decrypt_scratch_space(module, basek, ct.k()));
 
-    let sk_glwe_prepared: GLWESecretPrepared<Vec<u8>, FFT64Avx> =
+    let sk_glwe_prepared: GLWESecretPrepared<Vec<u8>, BackendImpl> =
         sk.prepare_alloc(&module, scratch.borrow());
     ct.decrypt(module, &mut pt, &sk_glwe_prepared, scratch.borrow());
 

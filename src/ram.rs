@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use itertools::izip;
-use poulpy_backend::FFT64Avx;
 
 use poulpy_core::{
     GLWEOperations, GLWEPacker, TakeGLWECt,
@@ -17,6 +16,7 @@ use poulpy_hal::{
 };
 
 use crate::{
+    BackendImpl,
     address::{Address, Coordinate},
     keys::EvaluationKeys,
     parameters::Parameters,
@@ -27,7 +27,7 @@ use crate::{
 pub struct Ram {
     pub(crate) params: Parameters,
     pub subrams: Vec<SubRam>,
-    pub(crate) scratch: ScratchOwned<FFT64Avx>,
+    pub(crate) scratch: ScratchOwned<BackendImpl>,
 }
 
 impl Default for Ram {
@@ -40,7 +40,7 @@ impl Ram {
     /// Instantiates a new [Ram].
     pub fn new() -> Self {
         let params: Parameters = Parameters::new();
-        let scratch: ScratchOwned<FFT64Avx> = ScratchOwned::alloc(Self::scratch_bytes(&params));
+        let scratch: ScratchOwned<BackendImpl> = ScratchOwned::alloc(Self::scratch_bytes(&params));
         Self {
             subrams: (0..params.word_size())
                 .map(|_| SubRam::alloc(&params))
@@ -53,7 +53,7 @@ impl Ram {
     #[allow(dead_code)]
     /// Scratch space size required by the [Ram].
     pub(crate) fn scratch_bytes(params: &Parameters) -> usize {
-        let module: &Module<FFT64Avx> = params.module();
+        let module: &Module<BackendImpl> = params.module();
         let k_ct: usize = params.k_ct();
         let k_evk: usize = params.k_evk();
         let basek: usize = params.basek();
@@ -93,7 +93,7 @@ impl Ram {
             max_addr
         );
 
-        let scratch: &mut Scratch<FFT64Avx> = self.scratch.borrow();
+        let scratch: &mut Scratch<BackendImpl> = self.scratch.borrow();
 
         let mut data_split: Vec<u8> = vec![0u8; max_addr];
         (0..ram_chunks).for_each(|i| {
@@ -167,12 +167,12 @@ impl Ram {
         assert!(w.len() == self.subrams.len());
 
         let params: &Parameters = &self.params;
-        let module: &Module<FFT64Avx> = params.module();
+        let module: &Module<BackendImpl> = params.module();
         let basek: usize = params.basek();
         let rank: usize = params.rank();
         let digits: usize = params.digits();
 
-        let scratch: &mut Scratch<FFT64Avx> = self.scratch.borrow();
+        let scratch: &mut Scratch<BackendImpl> = self.scratch.borrow();
         let auto_keys: &HashMap<i64, GGLWEAutomorphismKey<Vec<u8>>> = &keys.auto_keys;
         let tensor_key: &GGLWETensorKey<Vec<u8>> = &keys.tensor_key;
 
@@ -248,7 +248,7 @@ pub struct SubRam {
 
 impl SubRam {
     pub fn alloc(params: &Parameters) -> Self {
-        let module: &Module<FFT64Avx> = params.module();
+        let module: &Module<BackendImpl> = params.module();
         let basek: usize = params.basek();
         let k_ct: usize = params.k_ct();
         let rank: usize = params.rank();
@@ -281,9 +281,9 @@ impl SubRam {
         params: &Parameters,
         data: &[u8],
         sk: &GLWESecret<Vec<u8>>,
-        scratch: &mut Scratch<FFT64Avx>,
+        scratch: &mut Scratch<BackendImpl>,
     ) {
-        let module: &Module<FFT64Avx> = params.module();
+        let module: &Module<BackendImpl> = params.module();
         let k_pt: usize = params.k_pt();
         // let sigma: f64 = params.xe();
         let rank: usize = params.rank();
@@ -295,7 +295,7 @@ impl SubRam {
 
         let mut pt: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(module.n(), basek, k_pt);
         let mut data_i64: Vec<i64> = vec![0i64; module.n()];
-        let sk_glwe_prepared: GLWESecretPrepared<Vec<u8>, FFT64Avx> =
+        let sk_glwe_prepared: GLWESecretPrepared<Vec<u8>, BackendImpl> =
             sk.prepare_alloc(module, scratch);
 
         self.data = data
@@ -326,14 +326,14 @@ impl SubRam {
         params: &Parameters,
         address: &Address,
         auto_keys: &HashMap<i64, GGLWEAutomorphismKey<Vec<u8>>>,
-        scratch: &mut Scratch<FFT64Avx>,
+        scratch: &mut Scratch<BackendImpl>,
     ) -> GLWECiphertext<Vec<u8>> {
         assert!(
             !self.state,
             "invalid call to Memory.read: internal state is true -> requires calling Memory.write"
         );
 
-        let module: &Module<FFT64Avx> = params.module();
+        let module: &Module<BackendImpl> = params.module();
         let log_n: usize = module.log_n();
         let basek: usize = params.basek();
         let k_ct: usize = params.k_ct();
@@ -396,14 +396,14 @@ impl SubRam {
         params: &Parameters,
         address: &Address,
         auto_keys: &HashMap<i64, GGLWEAutomorphismKey<Vec<u8>>>,
-        scratch: &mut Scratch<FFT64Avx>,
+        scratch: &mut Scratch<BackendImpl>,
     ) -> GLWECiphertext<Vec<u8>> {
         assert!(
             !self.state,
             "invalid call to Memory.read: internal state is true -> requires calling Memory.write"
         );
 
-        let module: &Module<FFT64Avx> = params.module();
+        let module: &Module<BackendImpl> = params.module();
         let log_n: usize = module.log_n();
         let basek: usize = params.basek();
         let k_ct: usize = params.k_ct();
@@ -490,14 +490,14 @@ impl SubRam {
         w: &GLWECiphertext<DataW>,
         n2: usize,
         auto_keys: &HashMap<i64, GGLWEAutomorphismKey<Vec<u8>>>,
-        scratch: &mut Scratch<FFT64Avx>,
+        scratch: &mut Scratch<BackendImpl>,
     ) {
         assert!(
             self.state,
             "invalid call to Memory.write: internal state is false -> requires calling Memory.read_prepare_write"
         );
 
-        let module: &Module<FFT64Avx> = params.module();
+        let module: &Module<BackendImpl> = params.module();
         let log_n: usize = module.log_n();
         let basek: usize = params.basek();
         let k_ct: usize = params.k_ct();
@@ -515,7 +515,7 @@ impl SubRam {
             .collect::<HashMap<_, _>>();
 
         let (mut tmp_a, scratch_1) = scratch.take_glwe_ct(module.n(), basek, k_ct, rank);
-        tmp_a.trace::<Vec<u8>, _, FFT64Avx>(
+        tmp_a.trace::<Vec<u8>, _, BackendImpl>(
             module,
             0,
             log_n,
@@ -534,9 +534,9 @@ impl SubRam {
         params: &Parameters,
         inv_coordinate: &Coordinate<DataCoordinate>,
         auto_keys: &HashMap<i64, GGLWEAutomorphismKey<Vec<u8>>>,
-        scratch: &mut Scratch<FFT64Avx>,
+        scratch: &mut Scratch<BackendImpl>,
     ) {
-        let module: &Module<FFT64Avx> = params.module();
+        let module: &Module<BackendImpl> = params.module();
         let log_n: usize = module.log_n();
         let basek: usize = params.basek();
         let k_ct: usize = params.k_ct();
@@ -608,9 +608,9 @@ impl SubRam {
 
     fn write_last_step<DataCoordinate: Data + AsRef<[u8]>>(
         &mut self,
-        module: &Module<FFT64Avx>,
+        module: &Module<BackendImpl>,
         inv_coordinate: &Coordinate<DataCoordinate>,
-        scratch: &mut Scratch<FFT64Avx>,
+        scratch: &mut Scratch<BackendImpl>,
     ) {
         // Apply the last reverse shift to the top of the tree.
         self.data.iter_mut().for_each(|ct_lo| {

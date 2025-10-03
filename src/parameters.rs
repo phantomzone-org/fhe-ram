@@ -1,5 +1,6 @@
-use poulpy_backend::cpu_fft64_avx::FFT64Avx;
 use poulpy_hal::{api::ModuleNew, layouts::Module};
+
+use crate::BackendImpl;
 
 const LOG_N: usize = 12;
 const BASEK: usize = 17;
@@ -16,7 +17,7 @@ const MAX_ADDR: usize = 1 << 18;
 const DIGITS: usize = 1;
 
 pub struct Parameters {
-    module: Module<FFT64Avx>, // FFT/NTT tables.
+    module: Module<BackendImpl>, // FFT/NTT tables.
     basek: usize,             // Torus 2^{-k} decomposition.
     digits: usize,            // Digits of GGLWE/GGSW product
     rank: usize,              // GLWE/GGLWE/GGSW rank.
@@ -42,7 +43,7 @@ impl Parameters {
         assert!(DECOMP_N.iter().sum::<u8>() == LOG_N as u8);
 
         Self {
-            module: Module::<FFT64Avx>::new(1 << LOG_N),
+            module: Module::<BackendImpl>::new(1 << LOG_N),
             basek: BASEK,
             digits: DIGITS,
             rank: RANK,
@@ -62,7 +63,7 @@ impl Parameters {
         self.max_addr
     }
 
-    pub fn module(&self) -> &Module<FFT64Avx> {
+    pub fn module(&self) -> &Module<BackendImpl> {
         &self.module
     }
 

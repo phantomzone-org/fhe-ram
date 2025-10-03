@@ -1,4 +1,3 @@
-use poulpy_backend::cpu_fft64_avx::FFT64Avx;
 use poulpy_hal::{
     api::{ScratchOwnedAlloc, ScratchOwnedBorrow},
     layouts::{Module, ScratchOwned},
@@ -15,7 +14,7 @@ use poulpy_core::layouts::{
     prepared::{GGLWEAutomorphismKeyPrepared, GLWESecretPrepared},
 };
 
-use crate::parameters::Parameters;
+use crate::{BackendImpl, parameters::Parameters};
 
 /// Struct storing the FHE evaluation keys for the read/write on FHE-RAM.
 pub struct EvaluationKeys {
@@ -25,7 +24,7 @@ pub struct EvaluationKeys {
 
 /// Generates a new set of [EvaluationKeys] along with the associated secret-key.
 pub fn gen_keys(params: &Parameters) -> (GLWESecret<Vec<u8>>, EvaluationKeys) {
-    let module: &Module<FFT64Avx> = params.module();
+    let module: &Module<BackendImpl> = params.module();
     let basek: usize = params.basek();
     let k_evk: usize = params.k_evk();
     let rows: usize = params.rows_addr();
@@ -45,7 +44,7 @@ pub fn gen_keys(params: &Parameters) -> (GLWESecret<Vec<u8>>, EvaluationKeys) {
     let mut source_xa: Source = Source::new(seed_xa);
     let mut source_xe: Source = Source::new(seed_xe);
 
-    let mut scratch: ScratchOwned<FFT64Avx> = ScratchOwned::alloc(
+    let mut scratch: ScratchOwned<BackendImpl> = ScratchOwned::alloc(
         GGLWEAutomorphismKey::encrypt_sk_scratch_space(module, basek, k_evk, rank)
             | GGLWEAutomorphismKey::encrypt_sk_scratch_space(module, basek, k_evk, rank)
             | GGLWETensorKey::encrypt_sk_scratch_space(module, basek, k_evk, rank),
@@ -92,7 +91,7 @@ pub fn gen_keys(params: &Parameters) -> (GLWESecret<Vec<u8>>, EvaluationKeys) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use poulpy_core::layouts::{prepared::PrepareAlloc, GGLWECiphertext, GLWECiphertext, GLWEPlaintext};
+    use poulpy_core::layouts::{prepared::PrepareAlloc, GLWEPlaintext};
     use poulpy_hal::{
         api::{ScratchOwnedBorrow, VecZnxAutomorphismInplace, VecZnxCopy},
         layouts::ScratchOwned,
@@ -134,11 +133,11 @@ mod tests {
         pt.data
             .encode_vec_i64(basek, 0, k_pt, &pt_data, u8::BITS as usize);
 
-        let mut scratch: ScratchOwned<FFT64Avx> = ScratchOwned::alloc(
+        let mut scratch: ScratchOwned<BackendImpl> = ScratchOwned::alloc(
             GGLWEAutomorphismKey::encrypt_sk_scratch_space(module, basek, k_ct, rank)
             | GLWECiphertext::encrypt_sk_scratch_space(module, basek, k_ct)
         );
-        let sk_prepared: GLWESecretPrepared<Vec<u8>, FFT64Avx> =
+        let sk_prepared: GLWESecretPrepared<Vec<u8>, BackendImpl> =
             sk.prepare_alloc(module, scratch.borrow());
         let mut source_xa: Source = Source::new([3u8; 32]);
         let mut source_xe: Source = Source::new([4u8; 32]);
@@ -157,7 +156,7 @@ mod tests {
                 .auto_keys
                 .get(&gal_el)
                 .expect("automorphism key not found for Galois element");
-            let auto_key_prepared: GGLWEAutomorphismKeyPrepared<Vec<u8>, FFT64Avx> =
+            let auto_key_prepared: GGLWEAutomorphismKeyPrepared<Vec<u8>, BackendImpl> =
                 auto_key.prepare_alloc(module, scratch.borrow());
 
             let mut ct_out: GLWECiphertext<Vec<u8>> =
