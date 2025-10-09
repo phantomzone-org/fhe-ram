@@ -1,61 +1,123 @@
-use poulpy_hal::{api::ModuleNew, layouts::Module};
+use poulpy_core::layouts::{
+    Base2K, Dnum, Dsize, GGLWECiphertextLayout, GGSWCiphertextLayout, GLWECiphertextLayout, Rank,
+    TorusPrecision,
+};
+use poulpy_hal::{
+    api::ModuleNew,
+    layouts::{Backend, Module},
+};
 
-use crate::BackendImpl;
+use crate::{Base2D, get_base_2d};
 
-const LOG_N: usize = 12;
-const BASEK: usize = 17;
-const RANK: usize = 1;
-const K_PT: usize = u8::BITS as usize;
-const K_CT: usize = BASEK * 3;
-const K_ADDR: usize = BASEK * 4;
-const K_EVK: usize = BASEK * 5;
-const XS: f64 = 0.5;
-const XE: f64 = 3.2;
+const LOG_N: u32 = 12;
+const BASE2K: u32 = 17;
+const RANK: u32 = 1;
+const K_GLWE_PT: u32 = u8::BITS;
+const K_GLWE_CT: u32 = BASE2K * 3;
+const K_GGSW_ADDR: u32 = BASE2K * 4;
+const K_EVK_TRACE: u32 = BASE2K * 4;
+const K_EVK_GGSW_INV: u32 = BASE2K * 5;
 pub const DECOMP_N: [u8; 1] = [12];
 const WORDSIZE: usize = 4;
-const MAX_ADDR: usize = 1 << 18;
-const DIGITS: usize = 1;
+const MAX_ADDR: usize = 1 << 14;
 
-pub struct Parameters {
-    module: Module<BackendImpl>, // FFT/NTT tables.
-    basek: usize,             // Torus 2^{-k} decomposition.
-    digits: usize,            // Digits of GGLWE/GGSW product
-    rank: usize,              // GLWE/GGLWE/GGSW rank.
-    k_pt: usize,              // Ram plaintext (GLWE) Torus precision.
-    k_ct: usize,              // Ram ciphertext (GLWE) Torus precision.
-    k_addr: usize,            // Ram address (GGSW) Torus precision.
-    k_evk: usize,             // Ram evaluation keys (GGLWE) Torus precision
-    xs: f64,                  // Secret-key distribution.
-    xe: f64,                  // Noise standard deviation.
-    max_addr: usize,          // Maximum supported address.
-    decomp_n: Vec<u8>,        // Digit decomposition of N.
-    word_size: usize,         // Digit decomposition of a Ram word.
+pub struct Parameters<B: Backend> {
+    module: Module<B>,              // FFT/NTT tables.
+    base2k: Base2K,                 // Torus 2^{-k} decomposition.
+    rank: Rank,                     // GLWE/GGLWE/GGSW rank.
+    k_glwe_pt: TorusPrecision,      // Ram plaintext (GLWE) Torus precision.
+    k_glwe_ct: TorusPrecision,      // Ram ciphertext (GLWE) Torus precision.
+    k_ggsw_addr: TorusPrecision,    // Ram address (GGSW) Torus precision.
+    k_evk_trace: TorusPrecision,    // Ram trace evaluation key Torus precision
+    k_evk_ggsw_inv: TorusPrecision, // Ram GGSW(X^i) -> GGSW(X^-i) evaluation key Torus precision
+    max_addr: usize,                // Maximum supported address.
+    decomp_n: Vec<u8>,              // Digit decomposition of N.
+    word_size: usize,               // Digit decomposition of a Ram word.
 }
 
-impl Default for Parameters {
+impl<B: Backend> Default for Parameters<B>
+where
+    Module<B>: ModuleNew<B>,
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Parameters {
+impl<B: Backend> Parameters<B>
+where
+    Module<B>: ModuleNew<B>,
+{
     pub fn new() -> Self {
         assert!(DECOMP_N.iter().sum::<u8>() == LOG_N as u8);
 
         Self {
-            module: Module::<BackendImpl>::new(1 << LOG_N),
-            basek: BASEK,
-            digits: DIGITS,
-            rank: RANK,
-            k_ct: K_CT,
-            k_pt: K_PT,
-            k_addr: K_ADDR,
-            k_evk: K_EVK,
-            xs: XS,
-            xe: XE,
+            module: Module::<B>::new(1 << LOG_N),
+            base2k: BASE2K.into(),
+            rank: RANK.into(),
+            k_glwe_ct: K_GLWE_CT.into(),
+            k_glwe_pt: K_GLWE_PT.into(),
+            k_ggsw_addr: K_GGSW_ADDR.into(),
+            k_evk_trace: K_EVK_TRACE.into(),
+            k_evk_ggsw_inv: K_EVK_GGSW_INV.into(),
             max_addr: MAX_ADDR,
             decomp_n: DECOMP_N.to_vec(),
             word_size: WORDSIZE,
+        }
+    }
+}
+
+impl<B: Backend> Parameters<B> {
+    pub fn glwe_pt_infos(&self) -> GLWECiphertextLayout {
+        GLWECiphertextLayout {
+            n: self.module.n().into(),
+            k: self.k_glwe_pt(),
+            base2k: self.basek(),
+            rank: self.rank(),
+        }
+    }
+
+    pub fn glwe_ct_infos(&self) -> GLWECiphertextLayout {
+        GLWECiphertextLayout {
+            n: self.module.n().into(),
+            k: self.k_glwe_ct(),
+            base2k: self.basek(),
+            rank: self.rank(),
+        }
+    }
+
+    pub fn evk_glwe_infos(&self) -> GGLWECiphertextLayout {
+        GGLWECiphertextLayout {
+            n: self.module.n().into(),
+            base2k: self.basek(),
+            k: self.k_evk_trace(),
+            rank_in: self.rank(),
+            rank_out: self.rank(),
+            dnum: self.dnum_ct(),
+            dsize: Dsize(1),
+        }
+    }
+
+    pub fn evk_ggsw_infos(&self) -> GGLWECiphertextLayout {
+        GGLWECiphertextLayout {
+            n: self.module.n().into(),
+            base2k: self.basek(),
+            k: self.k_evk_ggsw_inv(),
+            rank_in: self.rank(),
+            rank_out: self.rank(),
+            dnum: self.dnum_ggsw(),
+            dsize: Dsize(1),
+        }
+    }
+
+    pub fn ggsw_infos(&self) -> GGSWCiphertextLayout {
+        GGSWCiphertextLayout {
+            n: self.module.n().into(),
+            base2k: self.basek(),
+            k: self.k_ggsw_addr(),
+            rank: self.rank(),
+            dnum: self.dnum_ct(),
+            dsize: Dsize(1),
         }
     }
 
@@ -63,77 +125,74 @@ impl Parameters {
         self.max_addr
     }
 
-    pub fn module(&self) -> &Module<BackendImpl> {
+    pub fn module(&self) -> &Module<B> {
         &self.module
     }
 
-    pub fn basek(&self) -> usize {
-        self.basek
+    pub fn basek(&self) -> Base2K {
+        self.base2k
     }
 
-    pub fn k_ct(&self) -> usize {
-        self.k_ct
+    pub fn k_glwe_ct(&self) -> TorusPrecision {
+        self.k_glwe_ct
     }
 
-    pub fn k_pt(&self) -> usize {
-        self.k_pt
+    pub fn k_glwe_pt(&self) -> TorusPrecision {
+        self.k_glwe_pt
     }
 
-    pub(crate) fn k_addr(&self) -> usize {
-        self.k_addr
+    pub(crate) fn k_ggsw_addr(&self) -> TorusPrecision {
+        self.k_ggsw_addr
     }
 
-    pub fn rank(&self) -> usize {
+    pub fn rank(&self) -> Rank {
         self.rank
-    }
-
-    pub fn xe(&self) -> f64 {
-        self.xe
     }
 
     pub fn word_size(&self) -> usize {
         self.word_size
     }
 
-    pub(crate) fn digits(&self) -> usize {
-        self.digits
+    pub(crate) fn k_evk_trace(&self) -> TorusPrecision {
+        self.k_evk_trace
     }
 
-    pub(crate) fn k_evk(&self) -> usize {
-        self.k_evk
+    pub(crate) fn k_evk_ggsw_inv(&self) -> TorusPrecision {
+        self.k_evk_ggsw_inv
     }
 
-    pub(crate) fn xs(&self) -> f64 {
-        self.xs
+    pub(crate) fn dnum_ct(&self) -> Dnum {
+        self.k_glwe_ct().div_ceil(self.basek()).into()
     }
 
-    pub(crate) fn rows_ct(&self) -> usize {
-        self.k_ct().div_ceil(self.basek())
-    }
-
-    pub(crate) fn rows_addr(&self) -> usize {
-        self.k_addr().div_ceil(self.basek())
+    pub(crate) fn dnum_ggsw(&self) -> Dnum {
+        self.k_ggsw_addr().div_ceil(self.basek()).into()
     }
 
     pub(crate) fn decomp_n(&self) -> Vec<u8> {
         self.decomp_n.clone()
     }
+
+    pub(crate) fn base2d(&self) -> Base2D {
+        get_base_2d(self.max_addr() as u32, self.decomp_n())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use poulpy_backend::FFT64Ref;
+
     use super::*;
 
     #[test]
     fn new_sets_expected_defaults() {
-        let p = Parameters::new();
+        let p: Parameters<FFT64Ref> = Parameters::<FFT64Ref>::new();
 
         // Public accessors
-        assert_eq!(p.basek(), BASEK);
-        assert_eq!(p.k_ct(), K_CT);
-        assert_eq!(p.k_pt(), K_PT);
+        assert_eq!(p.basek(), BASE2K);
+        assert_eq!(p.k_glwe_ct(), K_GLWE_CT);
+        assert_eq!(p.k_glwe_pt(), K_GLWE_PT);
         assert_eq!(p.rank(), RANK);
-        assert_eq!(p.xe(), XE);
         assert_eq!(p.word_size(), WORDSIZE);
         assert_eq!(p.max_addr(), MAX_ADDR);
 
@@ -141,24 +200,16 @@ mod tests {
         assert_eq!(p.module().n(), 1 << LOG_N);
 
         // Crate-visible accessors/fields
-        assert_eq!(p.k_addr(), K_ADDR);
-        assert_eq!(p.k_evk(), K_EVK);
-        assert_eq!(p.digits(), DIGITS);
-        assert_eq!(p.xs(), XS);
+        assert_eq!(p.k_ggsw_addr(), K_GGSW_ADDR);
+        assert_eq!(p.k_evk_ggsw_inv(), K_EVK_GGSW_INV);
+        assert_eq!(p.k_evk_trace(), K_EVK_TRACE);
 
         // Decomposition of N
         assert_eq!(p.decomp_n(), DECOMP_N.to_vec());
         assert_eq!(p.decomp_n().iter().copied().sum::<u8>(), LOG_N as u8);
-    }
 
-    #[test]
-    fn rows_are_computed_correctly() {
-        let p = Parameters::new();
+        let expected_rows_ct = K_GLWE_CT.div_ceil(BASE2K);
 
-        let expected_rows_ct = (K_CT + BASEK - 1) / BASEK;
-        let expected_rows_addr = (K_ADDR + BASEK - 1) / BASEK;
-
-        assert_eq!(p.rows_ct(), expected_rows_ct);
-        assert_eq!(p.rows_addr(), expected_rows_addr);
+        assert_eq!(p.dnum_ct(), expected_rows_ct);
     }
 }

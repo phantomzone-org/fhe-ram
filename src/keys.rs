@@ -1,203 +1,194 @@
 use poulpy_hal::{
-    api::{ScratchOwnedAlloc, ScratchOwnedBorrow},
-    layouts::{Module, ScratchOwned},
+    api::{
+        ScratchAvailable, ScratchOwnedAlloc, ScratchOwnedBorrow, SvpApplyDftToDft,
+        SvpApplyDftToDftInplace, SvpPPolAllocBytes, SvpPrepare, TakeScalarZnx, TakeVecZnx,
+        TakeVecZnxBig, TakeVecZnxDft, VecZnxAddInplace, VecZnxAddNormal, VecZnxAddScalarInplace,
+        VecZnxAutomorphism, VecZnxBigAllocBytes, VecZnxBigNormalize, VecZnxDftAllocBytes,
+        VecZnxDftApply, VecZnxFillUniform, VecZnxIdftApplyConsume, VecZnxIdftApplyTmpA,
+        VecZnxNormalize, VecZnxNormalizeInplace, VecZnxNormalizeTmpBytes, VecZnxSub,
+        VecZnxSubInplace, VecZnxSwitchRing, VmpPMatAlloc, VmpPrepare,
+    },
+    layouts::{Backend, Data, DataRef, Module, Scratch, ScratchOwned},
     source::Source,
 };
-use rand_core::{OsRng, TryRngCore};
 use std::collections::HashMap;
 
-use poulpy_core::layouts::{GGLWEAutomorphismKey, GGLWETensorKey, GLWECiphertext, GLWESecret};
-
-#[cfg(test)]
-use poulpy_core::layouts::{
-    Infos,
-    prepared::{GGLWEAutomorphismKeyPrepared, GLWESecretPrepared},
+use poulpy_core::{
+    TakeGLWESecretPrepared,
+    layouts::{
+        GGLWEAutomorphismKey, GGLWECiphertextLayout, GGLWETensorKey, GLWECiphertext, GLWESecret,
+        prepared::{GGLWEAutomorphismKeyPrepared, GGLWETensorKeyPrepared, PrepareAlloc},
+    },
 };
 
-use crate::{BackendImpl, parameters::Parameters};
+use crate::parameters::Parameters;
 
 /// Struct storing the FHE evaluation keys for the read/write on FHE-RAM.
-pub struct EvaluationKeys {
-    pub(crate) auto_keys: HashMap<i64, GGLWEAutomorphismKey<Vec<u8>>>,
-    pub(crate) tensor_key: GGLWETensorKey<Vec<u8>>,
+pub struct EvaluationKeys<D: Data> {
+    atk_glwe: HashMap<i64, GGLWEAutomorphismKey<D>>,
+    atk_ggsw_inv: GGLWEAutomorphismKey<D>,
+    tsk_ggsw_inv: GGLWETensorKey<D>,
 }
 
-/// Generates a new set of [EvaluationKeys] along with the associated secret-key.
-pub fn gen_keys(params: &Parameters) -> (GLWESecret<Vec<u8>>, EvaluationKeys) {
-    let module: &Module<BackendImpl> = params.module();
-    let basek: usize = params.basek();
-    let k_evk: usize = params.k_evk();
-    let rows: usize = params.rows_addr();
-    let rank: usize = params.rank();
-    let digits: usize = params.digits();
-
-    let mut seed_xs: [u8; 32] = [0u8; 32];
-    OsRng.try_fill_bytes(&mut seed_xs).unwrap();
-
-    let mut seed_xa: [u8; 32] = [0u8; 32];
-    OsRng.try_fill_bytes(&mut seed_xa).unwrap();
-
-    let mut seed_xe: [u8; 32] = [0u8; 32];
-    OsRng.try_fill_bytes(&mut seed_xe).unwrap();
-
-    let mut source_xs: Source = Source::new(seed_xs);
-    let mut source_xa: Source = Source::new(seed_xa);
-    let mut source_xe: Source = Source::new(seed_xe);
-
-    let mut scratch: ScratchOwned<BackendImpl> = ScratchOwned::alloc(
-        GGLWEAutomorphismKey::encrypt_sk_scratch_space(module, basek, k_evk, rank)
-            | GGLWEAutomorphismKey::encrypt_sk_scratch_space(module, basek, k_evk, rank)
-            | GGLWETensorKey::encrypt_sk_scratch_space(module, basek, k_evk, rank),
-    );
-
-    let mut sk: GLWESecret<Vec<u8>> = GLWESecret::alloc(module.n(), params.rank());
-    sk.fill_ternary_prob(params.xs(), &mut source_xs);
-
-    let gal_els: Vec<i64> = GLWECiphertext::trace_galois_elements(module);
-    let auto_keys = HashMap::from_iter(gal_els.iter().map(|gal_el| {
-        let mut key: GGLWEAutomorphismKey<Vec<u8>> =
-            GGLWEAutomorphismKey::alloc(module.n(), basek, k_evk, rows, digits, rank);
-        key.encrypt_sk(
-            module,
-            *gal_el,
-            &sk,
-            &mut source_xa,
-            &mut source_xe,
-            // params.xe(),
-            scratch.borrow(),
-        );
-        (*gal_el, key)
-    }));
-
-    let mut tensor_key = GGLWETensorKey::alloc(module.n(), basek, k_evk, rows, digits, rank);
-    tensor_key.encrypt_sk(
-        module,
-        &sk,
-        &mut source_xa,
-        &mut source_xe,
-        // params.xe(),
-        scratch.borrow(),
-    );
-
-    (
-        sk,
-        EvaluationKeys {
-            auto_keys,
-            tensor_key,
-        },
-    )
+pub struct EvaluationKeysPrepared<D: Data, B: Backend> {
+    pub(crate) atk_glwe: HashMap<i64, GGLWEAutomorphismKeyPrepared<D, B>>,
+    pub(crate) atk_ggsw_inv: GGLWEAutomorphismKeyPrepared<D, B>,
+    pub(crate) tsk_ggsw_inv: GGLWETensorKeyPrepared<D, B>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use poulpy_core::layouts::{prepared::PrepareAlloc, GLWEPlaintext};
-    use poulpy_hal::{
-        api::{ScratchOwnedBorrow, VecZnxAutomorphismInplace, VecZnxCopy},
-        layouts::ScratchOwned,
-        source::Source,
-    };
-
-    #[test]
-    fn gen_keys_builds_complete_auto_keys_set() {
-        let params = Parameters::new();
-        let (sk, keys) = gen_keys(&params);
-
-        // Expect one automorphism key per Galois element
-        let gal_els = GLWECiphertext::<Vec<u8>>::trace_galois_elements(params.module());
-        assert_eq!(keys.auto_keys.len(), gal_els.len());
-
-        // Every required element must exist and match its key parameter `p()`
-        for &el in &gal_els {
-            let k = keys
-                .auto_keys
-                .get(&el)
-                .expect("missing automorphism key for Galois element");
-            assert_eq!(k.p(), el);
+impl<B: Backend, DR: DataRef> PrepareAlloc<B, EvaluationKeysPrepared<Vec<u8>, B>>
+    for EvaluationKeys<DR>
+where
+    Module<B>: VmpPMatAlloc<B> + VmpPrepare<B>,
+{
+    fn prepare_alloc(
+        &self,
+        module: &Module<B>,
+        scratch: &mut Scratch<B>,
+    ) -> EvaluationKeysPrepared<Vec<u8>, B> {
+        EvaluationKeysPrepared {
+            atk_glwe: HashMap::from_iter(self.atk_glwe.iter().map(|(gal_el, key)| {
+                let key_prepared = key.prepare_alloc(module, scratch);
+                (*gal_el, key_prepared)
+            })),
+            atk_ggsw_inv: self.atk_ggsw_inv.prepare_alloc(module, scratch),
+            tsk_ggsw_inv: self.tsk_ggsw_inv.prepare_alloc(module, scratch),
         }
+    }
+}
 
-        // Encrypt a small plaintext into a GLWE ciphertext with the generated secret key
-        let module = params.module();
-        let basek = params.basek();
-        let k_ct = params.k_ct();
-        let k_pt = params.k_pt();
-        let rank = params.rank();
+impl EvaluationKeys<Vec<u8>> {
+    /// Constructor for EvaluationKeys
+    pub fn new(
+        atk_glwe: HashMap<i64, GGLWEAutomorphismKey<Vec<u8>>>,
+        atk_ggsw_inv: GGLWEAutomorphismKey<Vec<u8>>,
+        tsk_ggsw_inv: GGLWETensorKey<Vec<u8>>,
+    ) -> Self {
+        Self {
+            atk_glwe,
+            atk_ggsw_inv,
+            tsk_ggsw_inv,
+        }
+    }
 
-        let mut ct_in: GLWECiphertext<Vec<u8>> =
-            GLWECiphertext::alloc(module.n(), basek, k_ct, rank);
-        let mut pt: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(module.n(), basek, k_pt);
+    /// Getter for auto_keys at glwe level
+    pub fn atk_glwe(&self) -> &HashMap<i64, GGLWEAutomorphismKey<Vec<u8>>> {
+        &self.atk_glwe
+    }
 
-        let pt_data: Vec<i64> = (0..module.n())
-            .map(|i| (i % k_pt as usize) as i64)
-            .collect();
-        pt.data
-            .encode_vec_i64(basek, 0, k_pt, &pt_data, u8::BITS as usize);
+    /// Mutable getter for auto_keys at glwe level
+    pub fn atk_glwe_mut(&mut self) -> &mut HashMap<i64, GGLWEAutomorphismKey<Vec<u8>>> {
+        &mut self.atk_glwe
+    }
 
-        let mut scratch: ScratchOwned<BackendImpl> = ScratchOwned::alloc(
-            GGLWEAutomorphismKey::encrypt_sk_scratch_space(module, basek, k_ct, rank)
-            | GLWECiphertext::encrypt_sk_scratch_space(module, basek, k_ct)
+    /// Setter for auto_keys at glwe level
+    pub fn set_atk_glwe(&mut self, atk_glwe: HashMap<i64, GGLWEAutomorphismKey<Vec<u8>>>) {
+        self.atk_glwe = atk_glwe;
+    }
+
+    /// Getter for tensor_key at ggsw level
+    pub fn tsk_ggsw_inv(&self) -> &GGLWETensorKey<Vec<u8>> {
+        &self.tsk_ggsw_inv
+    }
+
+    /// Mutable getter for tensor_key at ggsw level
+    pub fn tsk_ggsw_inv_mut(&mut self) -> &mut GGLWETensorKey<Vec<u8>> {
+        &mut self.tsk_ggsw_inv
+    }
+
+    /// Setter for tensor_key at ggsw level
+    pub fn set_tsk_ggsw_inv(&mut self, tsk_ggsw_inv: GGLWETensorKey<Vec<u8>>) {
+        self.tsk_ggsw_inv = tsk_ggsw_inv;
+    }
+
+    /// Getter for auto_key(-1) at ggsw level
+    pub fn atk_ggsw_inv(&self) -> &GGLWEAutomorphismKey<Vec<u8>> {
+        &self.atk_ggsw_inv
+    }
+
+    /// Mutable getter for auto_key(-1) at ggsw level
+    pub fn atk_ggsw_inv_mut(&mut self) -> &mut GGLWEAutomorphismKey<Vec<u8>> {
+        &mut self.atk_ggsw_inv
+    }
+
+    /// Setter for auto_key(-1) at ggsw level
+    pub fn set_atk_ggsw_inv(&mut self, atk_ggsw_inv: GGLWEAutomorphismKey<Vec<u8>>) {
+        self.atk_ggsw_inv = atk_ggsw_inv;
+    }
+}
+
+impl EvaluationKeys<Vec<u8>> {
+    pub fn encrypt_sk<S, B: Backend>(
+        params: &Parameters<B>,
+        sk: &GLWESecret<S>,
+        source_xa: &mut Source,
+        source_xe: &mut Source,
+    ) -> EvaluationKeys<Vec<u8>>
+    where
+        S: DataRef,
+        ScratchOwned<B>: ScratchOwnedAlloc<B> + ScratchOwnedBorrow<B>,
+        Module<B>: SvpPPolAllocBytes
+            + VecZnxNormalizeTmpBytes
+            + VecZnxDftAllocBytes
+            + VecZnxNormalizeTmpBytes
+            + VecZnxBigAllocBytes,
+        Module<B>: VecZnxAddScalarInplace
+            + VecZnxDftAllocBytes
+            + VecZnxBigNormalize<B>
+            + VecZnxDftApply<B>
+            + SvpApplyDftToDftInplace<B>
+            + VecZnxIdftApplyConsume<B>
+            + VecZnxNormalizeTmpBytes
+            + VecZnxFillUniform
+            + VecZnxSubInplace
+            + VecZnxAddInplace
+            + VecZnxNormalizeInplace<B>
+            + VecZnxAddNormal
+            + VecZnxNormalize<B>
+            + VecZnxSub
+            + SvpPrepare<B>
+            + VecZnxSwitchRing
+            + SvpPPolAllocBytes
+            + VecZnxAutomorphism,
+        Scratch<B>: TakeVecZnxDft<B>
+            + ScratchAvailable
+            + TakeVecZnx
+            + TakeScalarZnx
+            + TakeGLWESecretPrepared<B>,
+        Module<B>: SvpApplyDftToDft<B> + VecZnxIdftApplyTmpA<B>,
+        Scratch<B>: TakeVecZnxBig<B>,
+    {
+        let module: &Module<B> = params.module();
+
+        let evk_glwe_infos: GGLWECiphertextLayout = params.evk_glwe_infos();
+        let evk_ggsw_infos: GGLWECiphertextLayout = params.evk_ggsw_infos();
+
+        let mut scratch: ScratchOwned<B> = ScratchOwned::alloc(
+            GGLWEAutomorphismKey::encrypt_sk_scratch_space(module, &evk_glwe_infos)
+                | GGLWEAutomorphismKey::encrypt_sk_scratch_space(module, &evk_ggsw_infos)
+                | GGLWETensorKey::encrypt_sk_scratch_space(module, &evk_ggsw_infos),
         );
-        let sk_prepared: GLWESecretPrepared<Vec<u8>, BackendImpl> =
-            sk.prepare_alloc(module, scratch.borrow());
-        let mut source_xa: Source = Source::new([3u8; 32]);
-        let mut source_xe: Source = Source::new([4u8; 32]);
-        ct_in.encrypt_sk(
-            module,
-            &pt,
-            &sk_prepared,
-            &mut source_xa,
-            &mut source_xe,
-            scratch.borrow(),
-        );
 
-        // Test all automorphisms
-        for &gal_el in &gal_els {
-            let auto_key = keys
-                .auto_keys
-                .get(&gal_el)
-                .expect("automorphism key not found for Galois element");
-            let auto_key_prepared: GGLWEAutomorphismKeyPrepared<Vec<u8>, BackendImpl> =
-                auto_key.prepare_alloc(module, scratch.borrow());
+        let gal_els: Vec<i64> = GLWECiphertext::trace_galois_elements(module);
+        let atk_glwe: HashMap<i64, GGLWEAutomorphismKey<Vec<u8>>> =
+            HashMap::from_iter(gal_els.iter().map(|gal_el| {
+                let mut key: GGLWEAutomorphismKey<Vec<u8>> =
+                    GGLWEAutomorphismKey::alloc(&evk_glwe_infos);
+                key.encrypt_sk(module, *gal_el, sk, source_xa, source_xe, scratch.borrow());
+                (*gal_el, key)
+            }));
 
-            let mut ct_out: GLWECiphertext<Vec<u8>> =
-                GLWECiphertext::alloc(module.n(), basek, k_ct, rank);
-            ct_out.automorphism(module, &ct_in, &auto_key_prepared, scratch.borrow());
+        let mut tsk_ggsw_inv: GGLWETensorKey<Vec<u8>> = GGLWETensorKey::alloc(&evk_ggsw_infos);
+        tsk_ggsw_inv.encrypt_sk(module, sk, source_xa, source_xe, scratch.borrow());
 
-            let mut pt_out: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(module.n(), basek, k_pt);
-            ct_out.decrypt(module, &mut pt_out, &sk_prepared, scratch.borrow());
+        let mut atk_ggsw_inv: GGLWEAutomorphismKey<Vec<u8>> =
+            GGLWEAutomorphismKey::alloc(&evk_ggsw_infos);
+        atk_ggsw_inv.encrypt_sk(module, -1, sk, source_xa, source_xe, scratch.borrow());
 
-            // Apply the same automorphism to the original plaintext
-            let mut pt_expected: GLWEPlaintext<Vec<u8>> =
-                GLWEPlaintext::alloc(module.n(), basek, k_pt);
-            module.vec_znx_copy(&mut pt_expected.data, 0, &pt.data, 0);
-            module.vec_znx_automorphism_inplace(gal_el, &mut pt_expected.data, 0, scratch.borrow());
-
-            // Verify the decrypted result matches the expected automorphism of the plaintext
-            assert_eq!(
-                pt_expected.data, pt_out.data,
-                "Automorphism failed for Galois element {}",
-                gal_el
-            );
-
-            // Structural invariants
-            assert_eq!(ct_out.basek(), ct_in.basek());
-            assert_eq!(ct_out.k(), ct_in.k());
-            assert_eq!(ct_out.n(), ct_in.n());
-
-            // For non-identity elements, the ciphertext should change
-            if gal_el != 1 {
-                assert_ne!(
-                    ct_out, ct_in,
-                    "Ciphertext unchanged for non-identity Galois element {}",
-                    gal_el
-                );
-            } else {
-                // For identity element, ciphertext should remain the same
-                assert_eq!(
-                    ct_out, ct_in,
-                    "Ciphertext changed for identity Galois element"
-                );
-            }
+        EvaluationKeys {
+            atk_glwe,
+            atk_ggsw_inv,
+            tsk_ggsw_inv,
         }
     }
 }
