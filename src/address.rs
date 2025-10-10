@@ -27,8 +27,8 @@ use crate::{Base2D, Coordinate, parameters::Parameters};
 /// Such decomposition is necessary if the ring degree
 /// N is smaller than the maximum supported address.
 pub struct Address<D: Data> {
-    coordinates: Vec<Coordinate<D>>,
-    base2d: Base2D,
+    pub coordinates: Vec<Coordinate<D>>,
+    pub base2d: Base2D,
 }
 
 impl<D: Data> LWEInfos for Address<D> {

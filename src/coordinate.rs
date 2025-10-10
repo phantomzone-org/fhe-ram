@@ -24,9 +24,9 @@ use crate::{Base1D, parameters::Parameters};
 /// This provides a second decomposition over the one in base N to
 /// to ensure that the digits are small enough to enable HE operation
 /// over the digits (e.g. 2-4 bits digits instead of log(N)-bits digits).
-pub(crate) struct Coordinate<D: Data> {
-    pub(crate) value: Vec<GGSWCiphertext<D>>,
-    pub(crate) base1d: Base1D,
+pub struct Coordinate<D: Data> {
+    pub value: Vec<GGSWCiphertext<D>>,
+    pub base1d: Base1D,
 }
 
 impl<D: Data> LWEInfos for Coordinate<D> {

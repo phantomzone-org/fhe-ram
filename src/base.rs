@@ -1,27 +1,27 @@
 /// Helper for 1D digit decomposition.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Base1D(pub Vec<u8>);
+pub struct Base1D(pub Vec<u8>);
 
 impl Base1D {
-    pub(crate) fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.0.len()
     }
 
-    pub(crate) fn max(&self) -> usize {
+    pub fn max(&self) -> usize {
         let mut max: usize = 1;
         self.0.iter().for_each(|i| max <<= i);
         max
     }
 
     #[allow(dead_code)]
-    pub(crate) fn gap(&self, log_n: usize) -> usize {
+    pub fn gap(&self, log_n: usize) -> usize {
         let mut gap: usize = log_n;
         self.0.iter().for_each(|i| gap >>= i);
         1 << gap
     }
 
     #[allow(dead_code)]
-    pub(crate) fn decomp(&self, value: u32) -> Vec<u8> {
+    pub fn decomp(&self, value: u32) -> Vec<u8> {
         self.0
             .iter()
             .scan(0, |sum_bases, &base| {
@@ -33,7 +33,7 @@ impl Base1D {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn recomp(&self, decomp: &[u8]) -> u32 {
+    pub fn recomp(&self, decomp: &[u8]) -> u32 {
         let mut value: u32 = 0;
         let mut sum_bases: u8 = 0;
         self.0.iter().enumerate().for_each(|(i, base)| {
@@ -46,10 +46,10 @@ impl Base1D {
 
 /// Helpe for 2D digit decomposition.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Base2D(pub Vec<Base1D>);
+pub struct Base2D(pub Vec<Base1D>);
 
 impl Base2D {
-    pub(crate) fn max_len(&self) -> usize {
+    pub fn max_len(&self) -> usize {
         let mut max: usize = 0;
         for base1d in self.0.iter() {
             max = max.max(base1d.size())
@@ -57,11 +57,11 @@ impl Base2D {
         max
     }
 
-    pub(crate) fn max(&self) -> usize {
+    pub fn max(&self) -> usize {
         self.as_1d().max()
     }
 
-    pub(crate) fn as_1d(&self) -> Base1D {
+    pub fn as_1d(&self) -> Base1D {
         Base1D(
             self.0
                 .iter()
@@ -71,17 +71,17 @@ impl Base2D {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn decomp(&self, value: u32) -> Vec<u8> {
+    pub fn decomp(&self, value: u32) -> Vec<u8> {
         self.as_1d().decomp(value)
     }
 
     #[allow(dead_code)]
-    pub(crate) fn recomp(&self, decomp: &[u8]) -> u32 {
+    pub fn recomp(&self, decomp: &[u8]) -> u32 {
         self.as_1d().recomp(decomp)
     }
 }
 
-pub(crate) fn get_base_2d(value: u32, base: Vec<u8>) -> Base2D {
+pub fn get_base_2d(value: u32, base: Vec<u8>) -> Base2D {
     let mut out = Vec::new();
     let mut value_bit_size = 32 - (value - 1).leading_zeros();
 
