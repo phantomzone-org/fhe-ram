@@ -1,14 +1,18 @@
-pub mod address;
-pub mod keys;
-pub mod parameters;
-pub mod ram;
+mod address;
+mod base;
+mod coordinate;
+mod coordinate_prepared;
+mod keys;
+mod parameters;
+mod ram;
 
-// Backend selection based on target architecture
-#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
-pub use poulpy_backend::FFT64Avx as BackendImpl;
-
-#[cfg(not(any(target_arch = "x86_64", target_arch = "x86")))]
-pub use poulpy_backend::FFT64Ref as BackendImpl;
+pub use address::*;
+pub(crate) use base::*;
+pub(crate) use coordinate::*;
+pub(crate) use coordinate_prepared::*;
+pub use keys::*;
+pub use parameters::*;
+pub use ram::*;
 
 #[inline(always)]
 pub fn reverse_bits_msb(x: usize, n: u32) -> usize {
