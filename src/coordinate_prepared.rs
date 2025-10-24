@@ -1,41 +1,32 @@
 use poulpy_hal::{
-    api::{
-        ScratchAvailable, TakeScalarZnx, TakeVecZnx, TakeVecZnxBig, TakeVecZnxDft,
-        VecZnxAutomorphismInplace, VecZnxBigAddSmallInplace, VecZnxBigAllocBytes,
-        VecZnxBigNormalize, VecZnxBigNormalizeTmpBytes, VecZnxDftAddInplace, VecZnxDftAllocBytes,
-        VecZnxDftApply, VecZnxDftCopy, VecZnxIdftApplyConsume, VecZnxIdftApplyTmpA,
-        VecZnxNormalize, VecZnxNormalizeTmpBytes, VmpApplyDftToDft, VmpApplyDftToDftAdd,
-        VmpApplyDftToDftTmpBytes, VmpPMatAllocBytes, VmpPrepare,
-    },
+    api::ModuleN,
     layouts::{Backend, Data, DataMut, DataRef, Module, Scratch},
 };
 
 use poulpy_core::{
-    GLWEExternalProduct, GLWEExternalProductInplace, TakeGGSW, TakeGGSWPreparedSlice,
+    GGSWAutomorphism, GLWEExternalProduct, ScratchTakeCore,
     layouts::{
-        GGSWCiphertext, GGSWInfos, GLWECiphertext, GLWEInfos, LWEInfos,
-        prepared::{
-            GGLWEAutomorphismKeyPrepared, GGLWETensorKeyPrepared, GGSWCiphertextPrepared, Prepare,
-        },
+        GGLWEInfos, GGLWEPreparedToRef, GGSWInfos, GGSWPrepared, GGSWPreparedFactory, GLWEInfos,
+        GLWETensorKeyPreparedToRef, GLWEToMut, GLWEToRef, GetGaloisElement, LWEInfos,
     },
 };
 
 use crate::{Base1D, Coordinate};
 
 pub(crate) struct CoordinatePrepared<D: Data, B: Backend> {
-    pub(crate) value: Vec<GGSWCiphertextPrepared<D, B>>,
+    pub(crate) value: Vec<GGSWPrepared<D, B>>,
     pub(crate) base1d: Base1D,
 }
 
 impl<B: Backend> CoordinatePrepared<Vec<u8>, B>
 where
-    Module<B>: VmpPMatAllocBytes,
+    Module<B>: GGSWPreparedFactory<B>,
 {
     pub(crate) fn alloc_bytes<A>(module: &Module<B>, infos: &A, size: usize) -> usize
     where
         A: GGSWInfos,
     {
-        size * GGSWCiphertextPrepared::alloc_bytes(module, infos)
+        size * GGSWPrepared::bytes_of_from_infos(module, infos)
     }
 }
 
@@ -70,28 +61,32 @@ impl<D: Data, B: Backend> GGSWInfos for CoordinatePrepared<D, B> {
 }
 
 pub(crate) trait TakeCoordinatePrepared<B: Backend> {
-    fn take_coordinate_prepared<A>(
+    fn take_coordinate_prepared<A, M>(
         &mut self,
+        module: &M,
         infos: &A,
         base1d: &Base1D,
     ) -> (CoordinatePrepared<&mut [u8], B>, &mut Self)
     where
+        M: ModuleN + GGSWPreparedFactory<B>,
         A: GGSWInfos;
 }
 
 impl<B: Backend> TakeCoordinatePrepared<B> for Scratch<B>
 where
-    Scratch<B>: TakeGGSWPreparedSlice<B>,
+    Self: ScratchTakeCore<B>,
 {
-    fn take_coordinate_prepared<A>(
+    fn take_coordinate_prepared<A, M>(
         &mut self,
+        module: &M,
         infos: &A,
         base1d: &Base1D,
     ) -> (CoordinatePrepared<&mut [u8], B>, &mut Self)
     where
         A: GGSWInfos,
+        M: ModuleN + GGSWPreparedFactory<B>,
     {
-        let (ggsws, scratch) = self.take_ggsw_prepared_slice(base1d.0.len(), infos);
+        let (ggsws, scratch) = self.take_ggsw_prepared_slice(module, base1d.0.len(), infos);
         (
             CoordinatePrepared {
                 value: ggsws,
@@ -102,11 +97,18 @@ where
     }
 }
 
-impl<DM: DataMut, DR: DataRef, B: Backend> Prepare<B, Coordinate<DR>> for CoordinatePrepared<DM, B>
+impl<DM: DataMut, B: Backend> CoordinatePrepared<DM, B>
 where
-    GGSWCiphertextPrepared<DM, B>: Prepare<B, GGSWCiphertext<DR>>,
+    Module<B>: GGSWPreparedFactory<B>,
 {
-    fn prepare(&mut self, module: &Module<B>, other: &Coordinate<DR>, scratch: &mut Scratch<B>) {
+    pub(crate) fn prepare<DR: DataRef>(
+        &mut self,
+        module: &Module<B>,
+        other: &Coordinate<DR>,
+        scratch: &mut Scratch<B>,
+    ) where
+        DR: DataRef,
+    {
         assert_eq!(self.base1d, other.base1d);
         for (el_prep, el) in self.value.iter_mut().zip(other.value.iter()) {
             el_prep.prepare(module, el, scratch)
@@ -116,33 +118,18 @@ where
 
 impl<D: DataMut, B: Backend> CoordinatePrepared<D, B> {
     /// Maps GGSW(X^{i}) to GGSW(X^{-i}).
-    pub(crate) fn prepare_inv<DataOther: DataRef, DataAK: DataRef, DataTK: DataRef>(
+    pub(crate) fn prepare_inv<DR: DataRef, M, G, T>(
         &mut self,
-        module: &Module<B>,
-        other: &Coordinate<DataOther>,
-        auto_key: &GGLWEAutomorphismKeyPrepared<DataAK, B>,
-        tensor_key: &GGLWETensorKeyPrepared<DataTK, B>,
+        module: &M,
+        other: &Coordinate<DR>,
+        auto_key: &G,
+        tensor_key: &T,
         scratch: &mut Scratch<B>,
     ) where
-        Scratch<B>: TakeScalarZnx,
-        Module<B>: VecZnxDftAllocBytes
-            + VmpApplyDftToDftTmpBytes
-            + VecZnxBigNormalizeTmpBytes
-            + VmpApplyDftToDft<B>
-            + VmpApplyDftToDftAdd<B>
-            + VecZnxDftApply<B>
-            + VecZnxIdftApplyConsume<B>
-            + VecZnxBigAddSmallInplace<B>
-            + VecZnxBigNormalize<B>
-            + VecZnxAutomorphismInplace<B>
-            + VecZnxBigAllocBytes
-            + VecZnxNormalizeTmpBytes
-            + VecZnxDftCopy<B>
-            + VecZnxDftAddInplace<B>
-            + VecZnxIdftApplyTmpA<B>
-            + VecZnxNormalize<B>
-            + VmpPrepare<B>,
-        Scratch<B>: TakeVecZnxDft<B> + ScratchAvailable + TakeVecZnxBig<B> + TakeVecZnx + TakeGGSW,
+        G: GGLWEPreparedToRef<B> + GetGaloisElement + GGLWEInfos,
+        T: GLWETensorKeyPreparedToRef<B>,
+        M: GGSWAutomorphism<B> + GGSWPreparedFactory<B>,
+        Scratch<B>: ScratchTakeCore<B>,
     {
         assert!(auto_key.p() == -1);
         assert_eq!(self.base1d, other.base1d);
@@ -157,35 +144,35 @@ impl<D: DataMut, B: Backend> CoordinatePrepared<D, B> {
 
 impl<D: DataRef, B: Backend> CoordinatePrepared<D, B> {
     /// Evaluates GLWE(m) * GGSW(X^i).
-    pub(crate) fn product<DataRes: DataMut, DataA: DataRef>(
-        &self,
-        module: &Module<B>,
-        res: &mut GLWECiphertext<DataRes>,
-        a: &GLWECiphertext<DataA>,
-        scratch: &mut Scratch<B>,
-    ) where
-        Module<B>: GLWEExternalProduct<B> + GLWEExternalProductInplace<B>,
+    pub(crate) fn product<R, A, M>(&self, module: &M, res: &mut R, a: &A, scratch: &mut Scratch<B>)
+    where
+        R: GLWEToMut,
+        A: GLWEToRef,
+        M: GLWEExternalProduct<B>,
+        Scratch<B>: ScratchTakeCore<B>,
     {
         for (i, coordinate) in self.value.iter().enumerate() {
             if i == 0 {
-                res.external_product(module, a, coordinate, scratch);
+                module.glwe_external_product(res, a, coordinate, scratch);
             } else {
-                res.external_product_inplace(module, coordinate, scratch);
+                module.glwe_external_product_inplace(res, coordinate, scratch);
             }
         }
     }
 
     /// Evaluates GLWE(m) * GGSW(X^i).
-    pub(crate) fn product_inplace<RES: DataMut>(
+    pub(crate) fn product_inplace<R>(
         &self,
         module: &Module<B>,
-        res: &mut GLWECiphertext<RES>,
+        res: &mut R,
         scratch: &mut Scratch<B>,
     ) where
-        Module<B>: GLWEExternalProductInplace<B>,
+        R: GLWEToMut,
+        Module<B>: GLWEExternalProduct<B>,
+        Scratch<B>: ScratchTakeCore<B>,
     {
         for coordinate in self.value.iter() {
-            res.external_product_inplace(module, coordinate, scratch);
+            module.glwe_external_product_inplace(res, coordinate, scratch);
         }
     }
 }

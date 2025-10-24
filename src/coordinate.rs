@@ -1,21 +1,16 @@
 use itertools::izip;
 use poulpy_hal::{
-    api::{
-        ScratchAvailable, SvpApplyDftToDftInplace, TakeScalarZnx, TakeVecZnx, TakeVecZnxDft,
-        VecZnxAddInplace, VecZnxAddNormal, VecZnxAddScalarInplace, VecZnxBigAllocBytes,
-        VecZnxBigNormalize, VecZnxBigNormalizeTmpBytes, VecZnxDftAllocBytes, VecZnxDftApply,
-        VecZnxFillUniform, VecZnxIdftApplyConsume, VecZnxNormalize, VecZnxNormalizeInplace,
-        VecZnxNormalizeTmpBytes, VecZnxSub, VecZnxSubInplace, VmpApplyDftToDftTmpBytes,
-        VmpPMatAllocBytes, VmpPrepareTmpBytes,
-    },
-    layouts::{Backend, Data, DataMut, DataRef, Module, Scratch, ZnxViewMut},
+    api::{ModuleN, ScratchTakeBasic},
+    layouts::{Backend, Data, DataMut, Module, ScalarZnx, Scratch, ZnxViewMut, ZnxZero},
     source::Source,
 };
 
-use poulpy_core::layouts::{
-    GGLWECiphertextLayout, GGSWCiphertext, GGSWCiphertextLayout, GGSWInfos, GLWECiphertext,
-    GLWECiphertextLayout, GLWEInfos, GLWESecret, LWEInfos,
-    prepared::{GLWESecretPrepared, PrepareAlloc},
+use poulpy_core::{
+    GGSWAutomorphism, GGSWEncryptSk, GLWEExternalProduct, GetDistribution, ScratchTakeCore,
+    layouts::{
+        GGLWELayout, GGSW, GGSWInfos, GGSWLayout, GLWE, GLWEInfos, GLWELayout, GLWESecretPrepared,
+        GLWESecretPreparedFactory, GLWESecretToRef, LWEInfos,
+    },
 };
 
 use crate::{Base1D, parameters::Parameters};
@@ -25,7 +20,7 @@ use crate::{Base1D, parameters::Parameters};
 /// to ensure that the digits are small enough to enable HE operation
 /// over the digits (e.g. 2-4 bits digits instead of log(N)-bits digits).
 pub struct Coordinate<D: Data> {
-    pub value: Vec<GGSWCiphertext<D>>,
+    pub value: Vec<GGSW<D>>,
     pub base1d: Base1D,
 }
 
@@ -70,7 +65,7 @@ impl Coordinate<Vec<u8>> {
             value: base1d
                 .0
                 .iter()
-                .map(|_| GGSWCiphertext::alloc(infos))
+                .map(|_| GGSW::alloc_from_infos(infos))
                 .collect(),
             base1d: base1d.clone(),
         }
@@ -79,37 +74,35 @@ impl Coordinate<Vec<u8>> {
     /// Scratch space required to invert a coordinate, i.e. map GGSW(X^{i}) to GGSW(X^{-i}).
     pub(crate) fn prepare_inv_scratch_space<B: Backend>(params: &Parameters<B>) -> usize
     where
-        Module<B>: VecZnxDftAllocBytes
-            + VmpApplyDftToDftTmpBytes
-            + VecZnxBigAllocBytes
-            + VecZnxNormalizeTmpBytes
-            + VecZnxBigNormalizeTmpBytes,
+        Module<B>: GGSWAutomorphism<B>,
     {
         let module: &Module<B> = params.module();
-        let ggsw_infos: &GGSWCiphertextLayout = &params.ggsw_infos();
-        let evk_infos: &GGLWECiphertextLayout = &params.evk_ggsw_infos();
+        let ggsw_infos: &GGSWLayout = &params.ggsw_infos();
+        let evk_infos: &GGLWELayout = &params.evk_ggsw_infos();
 
-        GGSWCiphertext::automorphism_scratch_space(
-            module, ggsw_infos, ggsw_infos, evk_infos, evk_infos,
-        ) + GGSWCiphertext::alloc_bytes(ggsw_infos)
+        GGSW::automorphism_tmp_bytes(module, ggsw_infos, ggsw_infos, evk_infos, evk_infos)
+            + GGSW::bytes_of_from_infos(ggsw_infos)
     }
 
     /// Scratch space required to evaluate GGSW(X^{i}) * GLWE(m).
     pub(crate) fn product_scratch_space<B: Backend>(params: &Parameters<B>) -> usize
     where
-        Module<B>: VecZnxDftAllocBytes
-            + VmpApplyDftToDftTmpBytes
-            + VecZnxBigAllocBytes
-            + VecZnxNormalizeTmpBytes
-            + VecZnxBigNormalizeTmpBytes
-            + VmpPrepareTmpBytes
-            + VmpPMatAllocBytes,
+        Module<B>: GLWEExternalProduct<B>,
     {
         let module: &Module<B> = params.module();
-        let glwe_infos: &GLWECiphertextLayout = &params.glwe_ct_infos();
-        let ggsw_infos: &GGSWCiphertextLayout = &params.ggsw_infos();
-        GLWECiphertext::external_product_scratch_space(module, glwe_infos, glwe_infos, ggsw_infos)
-            | GLWECiphertext::external_product_inplace_scratch_space(module, glwe_infos, ggsw_infos)
+        let glwe_infos: &GLWELayout = &params.glwe_ct_infos();
+        let ggsw_infos: &GGSWLayout = &params.ggsw_infos();
+        GLWE::external_product_tmp_bytes(module, glwe_infos, glwe_infos, ggsw_infos)
+    }
+
+    pub(crate) fn encrypt_sk_tmp_bytes<B: Backend>(params: &Parameters<B>) -> usize
+    where
+        Module<B>: GLWESecretPreparedFactory<B> + GGSWEncryptSk<B>,
+    {
+        let ggsw_infos: &GGSWLayout = &params.ggsw_infos();
+        ScalarZnx::bytes_of(ggsw_infos.n().into(), 1)
+            + GLWESecretPrepared::bytes_of(params.module(), ggsw_infos.rank())
+            + GGSW::encrypt_sk_tmp_bytes(params.module(), ggsw_infos)
     }
 }
 
@@ -125,40 +118,29 @@ impl<D: DataMut> Coordinate<D> {
     /// * `source_xe`: random coins generator for noise.
     /// * `sigma`: standard deviation of the noise.
     /// * `scratch`: scratch space provider.
-    pub(crate) fn encrypt_sk<DataSk: DataRef, B: Backend>(
+    pub(crate) fn encrypt_sk<S, M, B: Backend>(
         &mut self,
         value: i64,
-        module: &Module<B>,
-        sk: &GLWESecret<DataSk>,
+        module: &M,
+        sk: &S,
         source_xa: &mut Source,
         source_xe: &mut Source,
         scratch: &mut Scratch<B>,
     ) where
-        Scratch<B>: TakeScalarZnx,
-        GLWESecret<DataSk>: PrepareAlloc<B, GLWESecretPrepared<Vec<u8>, B>>,
-        Module<B>: VecZnxAddScalarInplace
-            + VecZnxDftAllocBytes
-            + VecZnxBigNormalize<B>
-            + VecZnxDftApply<B>
-            + SvpApplyDftToDftInplace<B>
-            + VecZnxIdftApplyConsume<B>
-            + VecZnxNormalizeTmpBytes
-            + VecZnxFillUniform
-            + VecZnxSubInplace
-            + VecZnxAddInplace
-            + VecZnxNormalizeInplace<B>
-            + VecZnxAddNormal
-            + VecZnxNormalize<B>
-            + VecZnxSub,
-        Scratch<B>: TakeVecZnxDft<B> + ScratchAvailable + TakeVecZnx,
+        M: GLWESecretPreparedFactory<B> + ModuleN + GGSWEncryptSk<B>,
+        S: GLWESecretToRef + GLWEInfos + GetDistribution,
+        Scratch<B>: ScratchTakeCore<B>,
     {
         let n: usize = module.n();
 
         assert!(value.abs() < n as i64);
 
         let (mut scalar, scratch1) = scratch.take_scalar_znx(module.n(), 1);
+        scalar.zero();
 
-        let sk_glwe_prepared: GLWESecretPrepared<Vec<u8>, B> = sk.prepare_alloc(module, scratch1);
+        let (mut sk_glwe_prepared, scratch_2) =
+            scratch1.take_glwe_secret_prepared(module, sk.rank());
+        sk_glwe_prepared.prepare(module, sk);
 
         let sign: i64 = value.signum();
         let gap: usize = 1; // self.base1d.gap(module.log_n());
@@ -166,7 +148,7 @@ impl<D: DataMut> Coordinate<D> {
         let mut remain: usize = value.unsigned_abs() as usize;
         let mut tot_base: u8 = 0;
 
-        izip!(self.value.iter_mut(), self.base1d.0.iter()).for_each(|(coordinate, base)| {
+        for (coordinate, base) in izip!(self.value.iter_mut(), self.base1d.0.iter()) {
             let mask: usize = (1 << base) - 1;
 
             let chunk: usize = ((remain & mask) << tot_base) * gap;
@@ -183,7 +165,7 @@ impl<D: DataMut> Coordinate<D> {
                 &sk_glwe_prepared,
                 source_xa,
                 source_xe,
-                scratch1,
+                scratch_2,
             );
 
             if sign < 0 && chunk != 0 {
@@ -194,6 +176,6 @@ impl<D: DataMut> Coordinate<D> {
 
             remain >>= base;
             tot_base += base;
-        });
+        }
     }
 }

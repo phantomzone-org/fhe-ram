@@ -1,6 +1,5 @@
 use poulpy_core::layouts::{
-    Base2K, Dnum, Dsize, GGLWECiphertextLayout, GGSWCiphertextLayout, GLWECiphertextLayout, Rank,
-    TorusPrecision,
+    Base2K, Dnum, Dsize, GGLWELayout, GGSWLayout, GLWELayout, Rank, TorusPrecision,
 };
 use poulpy_hal::{
     api::ModuleNew,
@@ -68,8 +67,8 @@ where
 }
 
 impl<B: Backend> Parameters<B> {
-    pub fn glwe_pt_infos(&self) -> GLWECiphertextLayout {
-        GLWECiphertextLayout {
+    pub fn glwe_pt_infos(&self) -> GLWELayout {
+        GLWELayout {
             n: self.module.n().into(),
             k: self.k_glwe_pt(),
             base2k: self.basek(),
@@ -77,8 +76,8 @@ impl<B: Backend> Parameters<B> {
         }
     }
 
-    pub fn glwe_ct_infos(&self) -> GLWECiphertextLayout {
-        GLWECiphertextLayout {
+    pub fn glwe_ct_infos(&self) -> GLWELayout {
+        GLWELayout {
             n: self.module.n().into(),
             k: self.k_glwe_ct(),
             base2k: self.basek(),
@@ -86,8 +85,8 @@ impl<B: Backend> Parameters<B> {
         }
     }
 
-    pub fn evk_glwe_infos(&self) -> GGLWECiphertextLayout {
-        GGLWECiphertextLayout {
+    pub fn evk_glwe_infos(&self) -> GGLWELayout {
+        GGLWELayout {
             n: self.module.n().into(),
             base2k: self.basek(),
             k: self.k_evk_trace(),
@@ -98,8 +97,8 @@ impl<B: Backend> Parameters<B> {
         }
     }
 
-    pub fn evk_ggsw_infos(&self) -> GGLWECiphertextLayout {
-        GGLWECiphertextLayout {
+    pub fn evk_ggsw_infos(&self) -> GGLWELayout {
+        GGLWELayout {
             n: self.module.n().into(),
             base2k: self.basek(),
             k: self.k_evk_ggsw_inv(),
@@ -110,8 +109,8 @@ impl<B: Backend> Parameters<B> {
         }
     }
 
-    pub fn ggsw_infos(&self) -> GGSWCiphertextLayout {
-        GGSWCiphertextLayout {
+    pub fn ggsw_infos(&self) -> GGSWLayout {
+        GGSWLayout {
             n: self.module.n().into(),
             base2k: self.basek(),
             k: self.k_ggsw_addr(),

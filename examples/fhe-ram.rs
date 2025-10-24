@@ -1,23 +1,20 @@
 use std::time::Instant;
 
 use poulpy_backend::FFT64Avx;
-use poulpy_core::layouts::{
-    GLWECiphertext, GLWECiphertextLayout, GLWEPlaintext, GLWESecret, LWEInfos,
-    prepared::{GLWESecretPrepared, PrepareAlloc},
+use poulpy_core::{
+    GLWEDecrypt, GLWEEncryptSk, ScratchTakeCore,
+    layouts::{
+        GLWE, GLWEInfos, GLWELayout, GLWEPlaintext, GLWESecret, LWEInfos,
+        prepared::GLWESecretPrepared,
+    },
 };
 use poulpy_hal::{
-    api::{
-        ScratchAvailable, ScratchOwnedAlloc, ScratchOwnedBorrow, SvpApplyDftToDftInplace,
-        TakeVecZnx, TakeVecZnxBig, TakeVecZnxDft, VecZnxAddInplace, VecZnxAddNormal,
-        VecZnxBigAddInplace, VecZnxBigAddSmallInplace, VecZnxBigNormalize, VecZnxDftAllocBytes,
-        VecZnxDftApply, VecZnxFillUniform, VecZnxIdftApplyConsume, VecZnxNormalize,
-        VecZnxNormalizeInplace, VecZnxNormalizeTmpBytes, VecZnxSub, VecZnxSubInplace,
-    },
+    api::{ScratchOwnedAlloc, ScratchOwnedBorrow, ScratchTakeBasic},
     layouts::{Backend, Module, Scratch, ScratchOwned},
     source::Source,
 };
 
-use fhe_ram::{Address, EvaluationKeys, Parameters, Ram};
+use fhe_ram::{Address, EvaluationKeys, EvaluationKeysPrepared, Parameters, Ram};
 use rand_core::RngCore;
 
 fn main() {
@@ -35,18 +32,21 @@ fn main() {
     let params: Parameters<FFT64Avx> = Parameters::<FFT64Avx>::new();
 
     // Generates a new secret-key along with the public evaluation keys.
-    let mut sk: GLWESecret<Vec<u8>> = GLWESecret::alloc(&params.glwe_ct_infos());
+    let mut sk: GLWESecret<Vec<u8>> = GLWESecret::alloc_from_infos(&params.glwe_ct_infos());
     sk.fill_ternary_prob(0.5, &mut source_xs);
 
     let keys: EvaluationKeys<Vec<u8>> =
         EvaluationKeys::encrypt_sk(&params, &sk, &mut source_xa, &mut source_xe);
 
-    let mut scratch: ScratchOwned<_> = ScratchOwned::alloc(1 << 24);
+    let mut scratch: ScratchOwned<FFT64Avx> = ScratchOwned::alloc(1 << 24);
 
-    let sk_prep: GLWESecretPrepared<Vec<u8>, _> =
-        sk.prepare_alloc(params.module(), scratch.borrow());
+    let mut sk_prep: GLWESecretPrepared<Vec<u8>, FFT64Avx> =
+        GLWESecretPrepared::alloc(params.module(), sk.rank());
+    sk_prep.prepare(params.module(), &sk);
 
-    let keys_prepared = keys.prepare_alloc(params.module(), scratch.borrow());
+    let mut keys_prepared: EvaluationKeysPrepared<Vec<u8>, FFT64Avx> =
+        EvaluationKeysPrepared::alloc(&params);
+    keys_prepared.prepare(params.module(), &keys, scratch.borrow());
 
     // Some deterministic randomness
     let mut source: Source = Source::new([5u8; 32]);
@@ -62,7 +62,7 @@ fn main() {
     let mut ram: Ram<FFT64Avx> = Ram::new();
 
     // Populates the FHE-RAM
-    ram.encrypt_sk(&data, &sk);
+    ram.encrypt_sk(&data, &sk, &mut source_xa, &mut source_xe);
 
     // Allocates an encrypted address.
     let mut addr: Address<Vec<u8>> = Address::alloc(&params);
@@ -71,11 +71,18 @@ fn main() {
     let idx: u32 = source.next_u32() % params.max_addr() as u32;
 
     // Encrypts random index
-    addr.encrypt_sk(&params, idx, &sk);
+    addr.encrypt_sk(
+        &params,
+        idx,
+        &sk,
+        &mut source_xa,
+        &mut source_xe,
+        scratch.borrow(),
+    );
 
     // Reads from the FHE-RAM
     let start: Instant = Instant::now();
-    let ct: Vec<GLWECiphertext<Vec<u8>>> = ram.read(&addr, &keys_prepared);
+    let ct: Vec<GLWE<Vec<u8>>> = ram.read(&addr, &keys_prepared);
     let duration: std::time::Duration = start.elapsed();
     println!("READ Elapsed time: {} ms", duration.as_millis());
 
@@ -95,7 +102,7 @@ fn main() {
 
     // Reads from the FHE-RAM (with preparing for write)
     let start: Instant = Instant::now();
-    let ct: Vec<GLWECiphertext<Vec<u8>>> = ram.read_prepare_write(&addr, &keys_prepared);
+    let ct: Vec<GLWE<Vec<u8>>> = ram.read_prepare_write(&addr, &keys_prepared);
     let duration: std::time::Duration = start.elapsed();
     println!(
         "READ_PREPARE_WRITE Elapsed time: {} ms",
@@ -138,7 +145,7 @@ fn main() {
     });
 
     // Reads back at the written index
-    let ct: Vec<GLWECiphertext<Vec<u8>>> = ram.read(&addr, &keys_prepared);
+    let ct: Vec<GLWE<Vec<u8>>> = ram.read(&addr, &keys_prepared);
 
     // Checks correctness
     (0..ws).for_each(|i| {
@@ -159,37 +166,22 @@ fn encrypt_glwe<B: Backend>(
     params: &Parameters<B>,
     value: u8,
     sk: &GLWESecretPrepared<Vec<u8>, B>,
-) -> GLWECiphertext<Vec<u8>>
+) -> GLWE<Vec<u8>>
 where
     ScratchOwned<B>: ScratchOwnedAlloc<B> + ScratchOwnedBorrow<B>,
-    Module<B>: VecZnxNormalizeTmpBytes + VecZnxDftAllocBytes,
-    GLWESecret<Vec<u8>>: PrepareAlloc<B, GLWESecretPrepared<Vec<u8>, B>>,
-    Module<B>: VecZnxDftAllocBytes
-        + VecZnxBigNormalize<B>
-        + VecZnxDftApply<B>
-        + SvpApplyDftToDftInplace<B>
-        + VecZnxIdftApplyConsume<B>
-        + VecZnxNormalizeTmpBytes
-        + VecZnxFillUniform
-        + VecZnxSubInplace
-        + VecZnxAddInplace
-        + VecZnxNormalizeInplace<B>
-        + VecZnxAddNormal
-        + VecZnxNormalize<B>
-        + VecZnxSub,
-    Scratch<B>: TakeVecZnxDft<B> + ScratchAvailable + TakeVecZnx,
+    Module<B>: GLWEEncryptSk<B>,
+    Scratch<B>: ScratchTakeCore<B>,
 {
     let module: &Module<B> = params.module();
 
-    let glwe_infos: GLWECiphertextLayout = params.glwe_ct_infos();
-    let pt_infos: GLWECiphertextLayout = params.glwe_pt_infos();
+    let glwe_infos: GLWELayout = params.glwe_ct_infos();
+    let pt_infos: GLWELayout = params.glwe_pt_infos();
 
-    let mut ct_w: GLWECiphertext<Vec<u8>> = GLWECiphertext::alloc(&glwe_infos);
-    let mut pt_w: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(&pt_infos);
+    let mut ct_w: GLWE<Vec<u8>> = GLWE::alloc_from_infos(&glwe_infos);
+    let mut pt_w: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc_from_infos(&pt_infos);
     pt_w.encode_coeff_i64(value as i64, pt_infos.k(), 0);
-    let mut scratch: ScratchOwned<B> = ScratchOwned::alloc(
-        GLWECiphertext::encrypt_sk_scratch_space(module, &glwe_infos),
-    );
+    let mut scratch: ScratchOwned<B> =
+        ScratchOwned::alloc(GLWE::encrypt_sk_tmp_bytes(module, &glwe_infos));
     let mut source_xa: Source = Source::new([1u8; 32]); // TODO: Create from random seed
     let mut source_xe: Source = Source::new([1u8; 32]); // TODO: Create from random seed
     ct_w.encrypt_sk(
@@ -205,27 +197,19 @@ where
 
 fn decrypt_glwe<B: Backend>(
     params: &Parameters<B>,
-    ct: &GLWECiphertext<Vec<u8>>,
+    ct: &GLWE<Vec<u8>>,
     want: u8,
     sk: &GLWESecretPrepared<Vec<u8>, B>,
 ) -> (i64, f64)
 where
     ScratchOwned<B>: ScratchOwnedAlloc<B> + ScratchOwnedBorrow<B>,
-    Module<B>: VecZnxDftAllocBytes + VecZnxNormalizeTmpBytes + VecZnxDftAllocBytes,
-    GLWESecret<Vec<u8>>: PrepareAlloc<B, GLWESecretPrepared<Vec<u8>, B>>,
-    Module<B>: VecZnxDftApply<B>
-        + SvpApplyDftToDftInplace<B>
-        + VecZnxIdftApplyConsume<B>
-        + VecZnxBigAddInplace<B>
-        + VecZnxBigAddSmallInplace<B>
-        + VecZnxBigNormalize<B>,
-    Scratch<B>: TakeVecZnxDft<B> + TakeVecZnxBig<B>,
+    Module<B>: GLWEDecrypt<B>,
+    Scratch<B>: ScratchTakeBasic,
 {
     let module: &Module<B> = params.module();
 
-    let mut pt: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(ct);
-    let mut scratch: ScratchOwned<B> =
-        ScratchOwned::alloc(GLWECiphertext::decrypt_scratch_space(module, ct));
+    let mut pt: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc_from_infos(ct);
+    let mut scratch: ScratchOwned<B> = ScratchOwned::alloc(GLWE::decrypt_tmp_bytes(module, ct));
 
     ct.decrypt(module, &mut pt, sk, scratch.borrow());
 

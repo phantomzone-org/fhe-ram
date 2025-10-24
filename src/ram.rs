@@ -1,32 +1,17 @@
 use std::collections::HashMap;
 
 use itertools::izip;
-
 use poulpy_core::{
-    GLWEExternalProductInplace, GLWEOperations, GLWEPacker, TakeGGSW, TakeGGSWPrepared,
-    TakeGGSWPreparedSlice, TakeGLWECt,
+    GGSWAutomorphism, GLWEAdd, GLWECopy, GLWEEncryptSk, GLWEExternalProduct, GLWENormalize,
+    GLWEPacker, GLWEPacking, GLWERotate, GLWESub, GLWETrace, GetDistribution, ScratchTakeCore,
     layouts::{
-        GGLWEAutomorphismKey, GGLWECiphertextLayout, GGSWCiphertext, GGSWCiphertextLayout,
-        GGSWInfos, GLWECiphertext, GLWECiphertextLayout, GLWEPlaintext, GLWESecret, LWEInfos,
-        prepared::{
-            GGLWEAutomorphismKeyPrepared, GGLWETensorKeyPrepared, GGSWCiphertextPrepared,
-            GLWESecretPrepared, Prepare, PrepareAlloc,
-        },
+        GGLWELayout, GGSWInfos, GGSWLayout, GGSWPreparedFactory, GLWE, GLWEAutomorphismKeyPrepared,
+        GLWEInfos, GLWELayout, GLWESecret, GLWESecretPreparedFactory, GLWESecretToRef,
+        GLWETensorKeyPrepared, LWEInfos,
     },
 };
 use poulpy_hal::{
-    api::{
-        ModuleNew, ScratchAvailable, ScratchOwnedAlloc, ScratchOwnedBorrow,
-        SvpApplyDftToDftInplace, TakeScalarZnx, TakeVecZnx, TakeVecZnxBig, TakeVecZnxDft,
-        VecZnxAddInplace, VecZnxAddNormal, VecZnxAutomorphismInplace, VecZnxBigAddInplace,
-        VecZnxBigAddSmallInplace, VecZnxBigAllocBytes, VecZnxBigAutomorphismInplace,
-        VecZnxBigNormalize, VecZnxBigNormalizeTmpBytes, VecZnxBigSubSmallNegateInplace, VecZnxCopy,
-        VecZnxDftAddInplace, VecZnxDftAllocBytes, VecZnxDftApply, VecZnxDftCopy, VecZnxFillUniform,
-        VecZnxIdftApplyConsume, VecZnxIdftApplyTmpA, VecZnxNegateInplace, VecZnxNormalize,
-        VecZnxNormalizeInplace, VecZnxNormalizeTmpBytes, VecZnxRotate, VecZnxRotateInplace,
-        VecZnxRshInplace, VecZnxSub, VecZnxSubInplace, VmpApplyDftToDft, VmpApplyDftToDftAdd,
-        VmpApplyDftToDftTmpBytes, VmpPMatAlloc, VmpPMatAllocBytes, VmpPrepare, VmpPrepareTmpBytes,
-    },
+    api::{ModuleNew, ScratchOwnedAlloc, ScratchOwnedBorrow, TakeSlice},
     layouts::{Backend, DataRef, Module, Scratch, ScratchOwned},
     source::Source,
 };
@@ -45,16 +30,12 @@ pub struct Ram<B: Backend> {
 
 impl<B: Backend> Default for Ram<B>
 where
-    Module<B>: ModuleNew<B>,
+    Module<B>: ModuleNew<B>
+        + GLWEPacking<B>
+        + GLWEEncryptSk<B>
+        + GGSWPreparedFactory<B>
+        + GGSWAutomorphism<B>,
     ScratchOwned<B>: ScratchOwnedAlloc<B>,
-    Module<B>: VecZnxNormalizeTmpBytes + VecZnxDftAllocBytes,
-    Module<B>: VecZnxDftAllocBytes
-        + VmpApplyDftToDftTmpBytes
-        + VecZnxBigNormalizeTmpBytes
-        + VecZnxNormalizeTmpBytes
-        + VecZnxBigAllocBytes
-        + VmpPrepareTmpBytes
-        + VmpPMatAllocBytes,
 {
     fn default() -> Self {
         Self::new()
@@ -63,15 +44,12 @@ where
 
 impl<B: Backend> Ram<B>
 where
-    Module<B>: ModuleNew<B>,
+    Module<B>: ModuleNew<B>
+        + GLWEPacking<B>
+        + GLWEEncryptSk<B>
+        + GGSWPreparedFactory<B>
+        + GGSWAutomorphism<B>,
     ScratchOwned<B>: ScratchOwnedAlloc<B>,
-    Module<B>: VecZnxNormalizeTmpBytes + VecZnxDftAllocBytes + VecZnxBigAllocBytes,
-    Module<B>: VecZnxDftAllocBytes
-        + VmpApplyDftToDftTmpBytes
-        + VecZnxBigNormalizeTmpBytes
-        + VecZnxNormalizeTmpBytes
-        + VmpPrepareTmpBytes
-        + VmpPMatAllocBytes,
 {
     /// Instantiates a new [Ram].
     pub fn new() -> Self {
@@ -91,27 +69,20 @@ impl<B: Backend> Ram<B> {
     /// Scratch space size required by the [Ram].
     pub(crate) fn scratch_bytes(params: &Parameters<B>) -> usize
     where
-        Module<B>: VecZnxNormalizeTmpBytes + VecZnxDftAllocBytes + VecZnxBigAllocBytes,
-        Module<B>: VecZnxDftAllocBytes
-            + VmpApplyDftToDftTmpBytes
-            + VecZnxBigNormalizeTmpBytes
-            + VecZnxNormalizeTmpBytes
-            + VmpPrepareTmpBytes
-            + VmpPMatAllocBytes,
+        Module<B>: GLWEPacking<B> + GLWEEncryptSk<B> + GGSWPreparedFactory<B> + GGSWAutomorphism<B>,
     {
         let module: &Module<B> = params.module();
-        let glwe_infos: GLWECiphertextLayout = params.glwe_ct_infos();
-        let ggsw_infos: GGSWCiphertextLayout = params.ggsw_infos();
-        let evk_glwe_infos: GGLWECiphertextLayout = params.evk_glwe_infos();
+        let glwe_infos: GLWELayout = params.glwe_ct_infos();
+        let ggsw_infos: GGSWLayout = params.ggsw_infos();
+        let evk_glwe_infos: GGLWELayout = params.evk_glwe_infos();
 
-        let enc_sk: usize = GLWECiphertext::encrypt_sk_scratch_space(module, &glwe_infos);
+        let enc_sk: usize = GLWE::encrypt_sk_tmp_bytes(module, &glwe_infos);
 
         // Read
         let coordinate_product: usize = Coordinate::product_scratch_space(params);
-        let packing: usize = GLWEPacker::scratch_space(module, &glwe_infos, &evk_glwe_infos);
-        let trace: usize =
-            GLWECiphertext::trace_inplace_scratch_space(module, &glwe_infos, &evk_glwe_infos);
-        let ct: usize = GLWECiphertext::alloc_bytes(&glwe_infos);
+        let packing: usize = GLWEPacker::tmp_bytes(module, &glwe_infos, &evk_glwe_infos);
+        let trace: usize = GLWE::trace_tmp_bytes(module, &glwe_infos, &glwe_infos, &evk_glwe_infos);
+        let ct: usize = GLWE::bytes_of_from_infos(&glwe_infos);
         let read: usize = coordinate_product.max(trace).max(packing);
 
         // Write
@@ -128,24 +99,16 @@ impl<B: Backend> Ram<B> {
     }
 
     /// Initialize the FHE-[Ram] with provided values (encrypted inder the provided secret).
-    pub fn encrypt_sk(&mut self, data: &[u8], sk: &GLWESecret<Vec<u8>>)
-    where
+    pub fn encrypt_sk(
+        &mut self,
+        data: &[u8],
+        sk: &GLWESecret<Vec<u8>>,
+        source_xa: &mut Source,
+        source_xe: &mut Source,
+    ) where
+        Module<B>: GLWESecretPreparedFactory<B> + GLWEEncryptSk<B>,
         ScratchOwned<B>: ScratchOwnedBorrow<B>,
-        GLWESecret<Vec<u8>>: PrepareAlloc<B, GLWESecretPrepared<Vec<u8>, B>>,
-        Module<B>: VecZnxDftAllocBytes
-            + VecZnxBigNormalize<B>
-            + VecZnxDftApply<B>
-            + SvpApplyDftToDftInplace<B>
-            + VecZnxIdftApplyConsume<B>
-            + VecZnxNormalizeTmpBytes
-            + VecZnxFillUniform
-            + VecZnxSubInplace
-            + VecZnxAddInplace
-            + VecZnxNormalizeInplace<B>
-            + VecZnxAddNormal
-            + VecZnxNormalize<B>
-            + VecZnxSub,
-        Scratch<B>: TakeVecZnxDft<B> + ScratchAvailable + TakeVecZnx,
+        Scratch<B>: ScratchTakeCore<B>,
     {
         let params: &Parameters<B> = &self.params;
         let max_addr: usize = params.max_addr();
@@ -172,48 +135,22 @@ impl<B: Backend> Ram<B> {
             for (j, x) in data_split.iter_mut().enumerate() {
                 *x = data[j * ram_chunks + i];
             }
-            self.subrams[i].encrypt_sk(params, &data_split, sk, scratch);
+            self.subrams[i].encrypt_sk(params, &data_split, sk, source_xa, source_xe, scratch);
         }
     }
 
     /// Simple read from the [Ram] at the provided encrypted address.
-    /// Returns a vector of [GLWECiphertext], where each ciphertext stores
+    /// Returns a vector of [GLWE], where each ciphertext stores
     /// Enc(m_i) where is the i-th digit of the word-size such that m = m_0 | m-1 | ...
     pub fn read<D: DataRef, DA: DataRef>(
         &mut self,
         address: &Address<DA>,
         keys: &EvaluationKeysPrepared<D, B>,
-    ) -> Vec<GLWECiphertext<Vec<u8>>>
+    ) -> Vec<GLWE<Vec<u8>>>
     where
+        Module<B>: GGSWPreparedFactory<B> + GLWEExternalProduct<B> + GLWEPacking<B>,
         ScratchOwned<B>: ScratchOwnedBorrow<B>,
-        GGLWEAutomorphismKey<Vec<u8>>: PrepareAlloc<B, GGLWEAutomorphismKeyPrepared<Vec<u8>, B>>,
-        Module<B>: VecZnxDftAllocBytes
-            + VmpApplyDftToDftTmpBytes
-            + VecZnxBigNormalizeTmpBytes
-            + VmpApplyDftToDft<B>
-            + VmpApplyDftToDftAdd<B>
-            + VecZnxDftApply<B>
-            + VecZnxIdftApplyConsume<B>
-            + VecZnxBigAddSmallInplace<B>
-            + VecZnxBigNormalize<B>
-            + VecZnxCopy
-            + VecZnxRotateInplace<B>
-            + VecZnxSub
-            + VecZnxNegateInplace
-            + VecZnxRshInplace<B>
-            + VecZnxAddInplace
-            + VecZnxNormalizeInplace<B>
-            + VecZnxSubInplace
-            + VecZnxRotate
-            + VecZnxAutomorphismInplace<B>
-            + VecZnxBigSubSmallNegateInplace<B>
-            + VecZnxBigAutomorphismInplace<B>
-            + VecZnxNormalize<B>
-            + VecZnxNormalizeTmpBytes,
-        Scratch<B>: TakeVecZnxDft<B> + ScratchAvailable + TakeVecZnx,
-        Scratch<B>: TakeScalarZnx + TakeGGSWPreparedSlice<B>,
-        GGSWCiphertext<Vec<u8>>: PrepareAlloc<B, GGSWCiphertextPrepared<Vec<u8>, B>>,
-        Module<B>: GLWEExternalProductInplace<B> + VmpPrepare<B>,
+        Scratch<B>: ScratchTakeCore<B>,
     {
         assert!(
             !self.subrams.is_empty(),
@@ -233,37 +170,11 @@ impl<B: Backend> Ram<B> {
         &mut self,
         address: &Address<DA>,
         keys: &EvaluationKeysPrepared<D, B>,
-    ) -> Vec<GLWECiphertext<Vec<u8>>>
+    ) -> Vec<GLWE<Vec<u8>>>
     where
+        Module<B>: GGSWPreparedFactory<B> + GLWEExternalProduct<B> + GLWEPacking<B>,
         ScratchOwned<B>: ScratchOwnedBorrow<B>,
-        GGLWEAutomorphismKey<Vec<u8>>: PrepareAlloc<B, GGLWEAutomorphismKeyPrepared<Vec<u8>, B>>,
-        Module<B>: VecZnxDftAllocBytes
-            + VmpApplyDftToDftTmpBytes
-            + VecZnxBigNormalizeTmpBytes
-            + VmpApplyDftToDft<B>
-            + VmpApplyDftToDftAdd<B>
-            + VecZnxDftApply<B>
-            + VecZnxIdftApplyConsume<B>
-            + VecZnxBigAddSmallInplace<B>
-            + VecZnxBigNormalize<B>
-            + VecZnxCopy
-            + VecZnxRotateInplace<B>
-            + VecZnxSub
-            + VecZnxNegateInplace
-            + VecZnxRshInplace<B>
-            + VecZnxAddInplace
-            + VecZnxNormalizeInplace<B>
-            + VecZnxSubInplace
-            + VecZnxRotate
-            + VecZnxAutomorphismInplace<B>
-            + VecZnxBigSubSmallNegateInplace<B>
-            + VecZnxBigAutomorphismInplace<B>
-            + VecZnxNormalize<B>
-            + VecZnxNormalizeTmpBytes
-            + VmpPrepare<B>,
-        Scratch<B>: TakeVecZnxDft<B> + ScratchAvailable + TakeVecZnx,
-        Scratch<B>: TakeScalarZnx + TakeGGSWPrepared<B>,
-        Module<B>: GLWEExternalProductInplace<B>,
+        Scratch<B>: ScratchTakeCore<B>,
     {
         assert!(
             !self.subrams.is_empty(),
@@ -287,55 +198,19 @@ impl<B: Backend> Ram<B> {
     /// called Bforehand.
     pub fn write<D: DataRef, DA: DataRef, K: DataRef>(
         &mut self,
-        w: &[GLWECiphertext<D>], // Must encrypt [w, 0, 0, ..., 0];
+        w: &[GLWE<D>], // Must encrypt [w, 0, 0, ..., 0];
         address: &Address<DA>,
         keys: &EvaluationKeysPrepared<K, B>,
     ) where
+        Module<B>: GGSWPreparedFactory<B>
+            + GGSWAutomorphism<B>
+            + GLWENormalize<B>
+            + GLWEAdd
+            + GLWESub
+            + GLWETrace<B>
+            + GLWERotate<B>,
         ScratchOwned<B>: ScratchOwnedBorrow<B>,
-        Module<B>: VmpPMatAlloc<B> + VmpPrepare<B>,
-        Scratch<B>: TakeScalarZnx,
-        Module<B>: VecZnxDftAllocBytes
-            + VmpApplyDftToDftTmpBytes
-            + VecZnxBigNormalizeTmpBytes
-            + VmpApplyDftToDft<B>
-            + VmpApplyDftToDftAdd<B>
-            + VecZnxDftApply<B>
-            + VecZnxIdftApplyConsume<B>
-            + VecZnxBigAddSmallInplace<B>
-            + VecZnxBigNormalize<B>
-            + VecZnxAutomorphismInplace<B>
-            + VecZnxBigAllocBytes
-            + VecZnxNormalizeTmpBytes
-            + VecZnxDftCopy<B>
-            + VecZnxDftAddInplace<B>
-            + VecZnxIdftApplyTmpA<B>
-            + VecZnxNormalize<B>,
-        Scratch<B>: TakeVecZnxDft<B> + ScratchAvailable + TakeVecZnxBig<B> + TakeVecZnx,
-        Module<B>: VecZnxNormalizeInplace<B> + VecZnxAddInplace + VecZnxSubInplace,
-        Scratch<B>: TakeGLWECt + TakeGGSWPrepared<B>,
-        Scratch<B>: TakeGGSWPrepared<B> + TakeGLWECt,
-        Module<B>: VmpPrepare<B> + GLWEExternalProductInplace<B> + VecZnxSubInplace,
-        Module<B>: VecZnxDftAllocBytes
-            + VmpApplyDftToDftTmpBytes
-            + VecZnxBigNormalizeTmpBytes
-            + VmpApplyDftToDft<B>
-            + VmpApplyDftToDftAdd<B>
-            + VecZnxDftApply<B>
-            + VecZnxIdftApplyConsume<B>
-            + VecZnxBigAddSmallInplace<B>
-            + VecZnxBigNormalize<B>
-            + VecZnxBigAutomorphismInplace<B>
-            + VecZnxRshInplace<B>
-            + VecZnxCopy
-            + VecZnxNormalizeTmpBytes
-            + VecZnxNormalize<B>
-            + VecZnxNormalizeInplace<B>
-            + VecZnxAddInplace
-            + VecZnxRotateInplace<B>
-            + SvpApplyDftToDftInplace<B>
-            + VecZnxBigAddInplace<B>,
-        Scratch<B>: TakeVecZnxDft<B> + ScratchAvailable + TakeVecZnx,
-        Scratch<B>: TakeGGSWPreparedSlice<B> + TakeGGSW,
+        Scratch<B>: ScratchTakeCore<B>,
     {
         assert!(w.len() == self.subrams.len());
 
@@ -343,9 +218,9 @@ impl<B: Backend> Ram<B> {
         let module: &Module<B> = params.module();
 
         let scratch: &mut Scratch<B> = self.scratch.borrow();
-        let atk_glwe: &HashMap<i64, GGLWEAutomorphismKeyPrepared<K, B>> = &keys.atk_glwe;
-        let atk_ggsw_inv: &GGLWEAutomorphismKeyPrepared<K, B> = &keys.atk_ggsw_inv;
-        let tsk_ggsw_inv: &GGLWETensorKeyPrepared<K, B> = &keys.tsk_ggsw_inv;
+        let atk_glwe: &HashMap<i64, GLWEAutomorphismKeyPrepared<K, B>> = &keys.atk_glwe;
+        let atk_ggsw_inv: &GLWEAutomorphismKeyPrepared<K, B> = &keys.atk_ggsw_inv;
+        let tsk_ggsw_inv: &GLWETensorKeyPrepared<K, B> = &keys.tsk_ggsw_inv;
 
         // Overwrites the coefficient that was read: to_write_on = to_write_on - TRACE(to_write_on) + w
         for (i, subram) in self.subrams.iter_mut().enumerate() {
@@ -357,7 +232,7 @@ impl<B: Backend> Ram<B> {
             let coordinate: &Coordinate<DA> = address.at(i + 1);
 
             let (mut inv_coordinate_prepared, scratch_1) =
-                scratch.take_coordinate_prepared(coordinate, &coordinate.base1d);
+                scratch.take_coordinate_prepared(module, coordinate, &coordinate.base1d);
 
             inv_coordinate_prepared.prepare_inv(
                 module,
@@ -375,7 +250,7 @@ impl<B: Backend> Ram<B> {
         let coordinate: &Coordinate<DA> = address.at(0);
 
         let (mut inv_coordinate_prepared, scratch_1) =
-            scratch.take_coordinate_prepared(coordinate, &coordinate.base1d);
+            scratch.take_coordinate_prepared(module, coordinate, &coordinate.base1d);
 
         inv_coordinate_prepared.prepare_inv(
             module,
@@ -393,8 +268,8 @@ impl<B: Backend> Ram<B> {
 
 /// [SubRam] stores a digit of the word.
 pub struct SubRam {
-    data: Vec<GLWECiphertext<Vec<u8>>>,
-    tree: Vec<Vec<GLWECiphertext<Vec<u8>>>>,
+    data: Vec<GLWE<Vec<u8>>>,
+    tree: Vec<Vec<GLWE<Vec<u8>>>>,
     packer: GLWEPacker,
     state: bool,
 }
@@ -403,18 +278,18 @@ impl SubRam {
     pub fn alloc<B: Backend>(params: &Parameters<B>) -> Self {
         let module: &Module<B> = params.module();
 
-        let glwe_infos: GLWECiphertextLayout = params.glwe_ct_infos();
+        let glwe_infos: GLWELayout = params.glwe_ct_infos();
 
         let n: usize = module.n();
-        let mut tree: Vec<Vec<GLWECiphertext<Vec<u8>>>> = Vec::new();
+        let mut tree: Vec<Vec<GLWE<Vec<u8>>>> = Vec::new();
         let max_addr_split: usize = params.max_addr(); // u8 -> u32
 
         if max_addr_split > n {
             let mut size: usize = max_addr_split.div_ceil(n);
             while size != 1 {
                 size = size.div_ceil(n);
-                let tmp: Vec<GLWECiphertext<Vec<u8>>> = (0..size)
-                    .map(|_| GLWECiphertext::alloc(&glwe_infos))
+                let tmp: Vec<GLWE<Vec<u8>>> = (0..size)
+                    .map(|_| GLWE::alloc_from_infos(&glwe_infos))
                     .collect();
                 tree.push(tmp);
             }
@@ -423,62 +298,53 @@ impl SubRam {
         Self {
             data: Vec::new(),
             tree,
-            packer: GLWEPacker::new(&glwe_infos, 0),
+            packer: GLWEPacker::alloc(&glwe_infos, 0),
             state: false,
         }
     }
 
-    pub fn encrypt_sk<B: Backend>(
+    pub fn encrypt_sk<B: Backend, S>(
         &mut self,
         params: &Parameters<B>,
         data: &[u8],
-        sk: &GLWESecret<Vec<u8>>,
+        sk: &S,
+        source_xa: &mut Source,
+        source_xe: &mut Source,
         scratch: &mut Scratch<B>,
     ) where
-        GLWESecret<Vec<u8>>: PrepareAlloc<B, GLWESecretPrepared<Vec<u8>, B>>,
-        Module<B>: VecZnxDftAllocBytes
-            + VecZnxBigNormalize<B>
-            + VecZnxDftApply<B>
-            + SvpApplyDftToDftInplace<B>
-            + VecZnxIdftApplyConsume<B>
-            + VecZnxNormalizeTmpBytes
-            + VecZnxFillUniform
-            + VecZnxSubInplace
-            + VecZnxAddInplace
-            + VecZnxNormalizeInplace<B>
-            + VecZnxAddNormal
-            + VecZnxNormalize<B>
-            + VecZnxSub,
-        Scratch<B>: TakeVecZnxDft<B> + ScratchAvailable + TakeVecZnx,
+        Module<B>: GLWESecretPreparedFactory<B> + GLWEEncryptSk<B>,
+        S: GLWESecretToRef + GetDistribution + GLWEInfos,
+        Scratch<B>: ScratchTakeCore<B>,
     {
         let module: &Module<B> = params.module();
 
-        let glwe_infos: GLWECiphertextLayout = params.glwe_ct_infos();
-        let pt_infos: GLWECiphertextLayout = params.glwe_pt_infos();
+        let glwe_infos: GLWELayout = params.glwe_ct_infos();
+        let pt_infos: GLWELayout = params.glwe_pt_infos();
 
-        let mut source_xa: Source = Source::new([1u8; 32]); // TODO: Create from random seed
-        let mut source_xe: Source = Source::new([1u8; 32]); // TODO: Create from random seed
-
-        let mut pt: GLWEPlaintext<Vec<u8>> = GLWEPlaintext::alloc(&pt_infos);
-        let mut data_i64: Vec<i64> = vec![0i64; module.n()];
-        let sk_glwe_prepared: GLWESecretPrepared<Vec<u8>, B> = sk.prepare_alloc(module, scratch);
+        let (mut pt, scratch_1) = scratch.take_glwe_plaintext(&pt_infos);
+        let (data_i64, scratch_2) = scratch_1.take_slice(module.n());
+        let (mut sk_glwe_prepared, scratch_3) =
+            scratch_2.take_glwe_secret_prepared(module, sk.rank());
+        sk_glwe_prepared.prepare(module, sk);
 
         self.data = data
             .chunks(module.n())
             .map(|chunk| {
-                let mut ct: GLWECiphertext<Vec<u8>> = GLWECiphertext::alloc(&glwe_infos);
-                izip!(data_i64.iter_mut(), chunk.iter())
-                    .for_each(|(xi64, xu8)| *xi64 = *xu8 as i64);
+                let mut ct: GLWE<Vec<u8>> = GLWE::alloc_from_infos(&glwe_infos);
+
+                for (x_i64, x_u8) in izip!(data_i64.iter_mut(), chunk.iter()) {
+                    *x_i64 = (*x_u8 as i8) as i64
+                }
+
                 data_i64[chunk.len()..].iter_mut().for_each(|x| *x = 0);
                 pt.encode_vec_i64(&data_i64, pt.k());
                 ct.encrypt_sk(
                     module,
                     &pt,
                     &sk_glwe_prepared,
-                    &mut source_xa,
-                    &mut source_xe,
-                    // sigma,
-                    scratch,
+                    source_xa,
+                    source_xe,
+                    scratch_3,
                 );
                 ct
             })
@@ -489,41 +355,12 @@ impl SubRam {
         &mut self,
         params: &Parameters<B>,
         address: &Address<DA>,
-        auto_keys: &HashMap<i64, GGLWEAutomorphismKeyPrepared<K, B>>,
+        auto_keys: &HashMap<i64, GLWEAutomorphismKeyPrepared<K, B>>,
         scratch: &mut Scratch<B>,
-    ) -> GLWECiphertext<Vec<u8>>
+    ) -> GLWE<Vec<u8>>
     where
-        GGSWCiphertext<Vec<u8>>: PrepareAlloc<B, GGSWCiphertextPrepared<Vec<u8>, B>>,
-        GGLWEAutomorphismKey<Vec<u8>>: PrepareAlloc<B, GGLWEAutomorphismKeyPrepared<Vec<u8>, B>>,
-        Module<B>: VecZnxDftAllocBytes
-            + VmpApplyDftToDftTmpBytes
-            + VecZnxBigNormalizeTmpBytes
-            + VmpApplyDftToDft<B>
-            + VmpApplyDftToDftAdd<B>
-            + VecZnxDftApply<B>
-            + VecZnxIdftApplyConsume<B>
-            + VecZnxBigAddSmallInplace<B>
-            + VecZnxBigNormalize<B>
-            + VecZnxCopy
-            + VecZnxRotateInplace<B>
-            + VecZnxSub
-            + VecZnxNegateInplace
-            + VecZnxRshInplace<B>
-            + VecZnxAddInplace
-            + VecZnxNormalizeInplace<B>
-            + VecZnxSubInplace
-            + VecZnxRotate
-            + VecZnxAutomorphismInplace<B>
-            + VecZnxBigSubSmallNegateInplace<B>
-            + VecZnxBigAutomorphismInplace<B>
-            + VecZnxNormalize<B>
-            + VecZnxNormalizeTmpBytes,
-        Scratch<B>: TakeVecZnxDft<B>
-            + ScratchAvailable
-            + TakeVecZnx
-            + TakeScalarZnx
-            + TakeCoordinatePrepared<B>,
-        Module<B>: VmpPrepare<B>,
+        Module<B>: GGSWPreparedFactory<B> + GLWEExternalProduct<B> + GLWEPacking<B>,
+        Scratch<B>: ScratchTakeCore<B> + TakeCoordinatePrepared<B>,
     {
         assert!(
             !self.state,
@@ -533,29 +370,28 @@ impl SubRam {
         let module: &Module<B> = params.module();
         let log_n: usize = module.log_n();
 
-        let glwe_infos: GLWECiphertextLayout = params.glwe_ct_infos();
-        let ggsw_infos: GGSWCiphertextLayout = params.ggsw_infos();
+        let glwe_infos: GLWELayout = params.glwe_ct_infos();
+        let ggsw_infos: GGSWLayout = params.ggsw_infos();
 
         assert_eq!(ggsw_infos, address.ggsw_layout());
 
         let packer: &mut GLWEPacker = &mut self.packer;
 
-        let mut results: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
-        let mut tmp_ct: GLWECiphertext<Vec<u8>> = GLWECiphertext::alloc(&glwe_infos);
+        let mut results: Vec<GLWE<Vec<u8>>> = Vec::new();
+        let mut tmp_ct: GLWE<Vec<u8>> = GLWE::alloc_from_infos(&glwe_infos);
 
         for i in 0..address.n2() {
             let coordinate: &Coordinate<DA> = address.at(i);
 
-            let res_prev: &Vec<GLWECiphertext<Vec<u8>>> =
-                if i == 0 { &self.data } else { &results };
+            let res_prev: &Vec<GLWE<Vec<u8>>> = if i == 0 { &self.data } else { &results };
 
             let (mut coordinate_prepared, scratch_1) =
-                scratch.take_coordinate_prepared(&ggsw_infos, &coordinate.base1d);
+                scratch.take_coordinate_prepared(module, &ggsw_infos, &coordinate.base1d);
 
             coordinate_prepared.prepare(module, coordinate, scratch_1);
 
             if i < address.n2() - 1 {
-                // let mut result_next: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
+                // let mut result_next: Vec<GLWE<Vec<u8>>> = Vec::new();
 
                 for chunk in res_prev.chunks(module.n()) {
                     for j in 0..module.n() {
@@ -573,7 +409,7 @@ impl SubRam {
                             packer.add(
                                 module,
                                 // &mut result_next,
-                                None::<&GLWECiphertext<Vec<u8>>>,
+                                None::<&GLWE<Vec<u8>>>,
                                 auto_keys,
                                 scratch_1,
                             );
@@ -598,36 +434,12 @@ impl SubRam {
         &mut self,
         params: &Parameters<B>,
         address: &Address<DA>,
-        auto_keys: &HashMap<i64, GGLWEAutomorphismKeyPrepared<D, B>>,
+        auto_keys: &HashMap<i64, GLWEAutomorphismKeyPrepared<D, B>>,
         scratch: &mut Scratch<B>,
-    ) -> GLWECiphertext<Vec<u8>>
+    ) -> GLWE<Vec<u8>>
     where
-        Scratch<B>: TakeGGSWPrepared<B>,
-        Module<B>: VmpPrepare<B> + GLWEExternalProductInplace<B>,
-        Module<B>: VecZnxDftAllocBytes
-            + VmpApplyDftToDftTmpBytes
-            + VecZnxBigNormalizeTmpBytes
-            + VmpApplyDftToDft<B>
-            + VmpApplyDftToDftAdd<B>
-            + VecZnxDftApply<B>
-            + VecZnxIdftApplyConsume<B>
-            + VecZnxBigAddSmallInplace<B>
-            + VecZnxBigNormalize<B>
-            + VecZnxCopy
-            + VecZnxRotateInplace<B>
-            + VecZnxSub
-            + VecZnxNegateInplace
-            + VecZnxRshInplace<B>
-            + VecZnxAddInplace
-            + VecZnxNormalizeInplace<B>
-            + VecZnxSubInplace
-            + VecZnxRotate
-            + VecZnxAutomorphismInplace<B>
-            + VecZnxBigSubSmallNegateInplace<B>
-            + VecZnxBigAutomorphismInplace<B>
-            + VecZnxNormalize<B>
-            + VecZnxNormalizeTmpBytes,
-        Scratch<B>: TakeVecZnxDft<B> + ScratchAvailable + TakeVecZnx,
+        Module<B>: GGSWPreparedFactory<B> + GLWEExternalProduct<B> + GLWEPacking<B>,
+        Scratch<B>: ScratchTakeCore<B> + TakeCoordinatePrepared<B>,
     {
         assert!(
             !self.state,
@@ -636,25 +448,25 @@ impl SubRam {
 
         let module: &Module<B> = params.module();
         let log_n: usize = module.log_n();
-        let ggsw_infos: GGSWCiphertextLayout = params.ggsw_infos();
+        let ggsw_infos: GGSWLayout = params.ggsw_infos();
         let packer: &mut GLWEPacker = &mut self.packer;
 
         assert_eq!(ggsw_infos, address.ggsw_layout());
 
-        let mut results: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
-        let mut tmp_ct: GLWECiphertext<Vec<u8>> = GLWECiphertext::alloc(&params.glwe_ct_infos());
+        let mut results: Vec<GLWE<Vec<u8>>> = Vec::new();
+        let mut tmp_ct: GLWE<Vec<u8>> = GLWE::alloc_from_infos(&params.glwe_ct_infos());
 
         for i in 0..address.n2() {
             let coordinate: &Coordinate<DA> = address.at(i);
 
-            let res_prev: &mut Vec<GLWECiphertext<Vec<u8>>> = if i == 0 {
+            let res_prev: &mut Vec<GLWE<Vec<u8>>> = if i == 0 {
                 &mut self.data
             } else {
                 &mut self.tree[i - 1]
             };
 
             let (mut coordinate_prepared, scratch_1) =
-                scratch.take_coordinate_prepared(&ggsw_infos, &coordinate.base1d);
+                scratch.take_coordinate_prepared(module, &ggsw_infos, &coordinate.base1d);
 
             coordinate_prepared.prepare(module, coordinate, scratch_1);
 
@@ -664,7 +476,7 @@ impl SubRam {
             }
 
             if i < address.n2() - 1 {
-                // let mut result_next: Vec<GLWECiphertext<Vec<u8>>> = Vec::new();
+                // let mut result_next: Vec<GLWE<Vec<u8>>> = Vec::new();
 
                 // Packs the first coefficient of each polynomial.
                 for chunk in res_prev.chunks(module.n()) {
@@ -682,7 +494,7 @@ impl SubRam {
                             packer.add(
                                 module,
                                 // &mut result_next, // TODO : is it okay that this isn't Bing used?
-                                None::<&GLWECiphertext<Vec<u8>>>,
+                                None::<&GLWE<Vec<u8>>>,
                                 auto_keys,
                                 scratch,
                             );
@@ -696,18 +508,18 @@ impl SubRam {
 
                 // Stores the packed polynomial
                 izip!(self.tree[i].iter_mut(), results.iter()).for_each(|(a, b)| {
-                    a.copy(module, b);
+                    module.glwe_copy(a, b);
                 });
             }
         }
 
-        let mut res: GLWECiphertext<Vec<u8>> = GLWECiphertext::alloc(&params.glwe_ct_infos());
+        let mut res: GLWE<Vec<u8>> = GLWE::alloc_from_infos(&params.glwe_ct_infos());
 
         self.state = true;
         if address.n2() != 1 {
-            res.copy(module, &self.tree.last().unwrap()[0]);
+            module.glwe_copy(&mut res, &self.tree.last().unwrap()[0]);
         } else {
-            res.copy(module, &self.data[0]);
+            module.glwe_copy(&mut res, &self.data[0]);
         }
 
         res.trace_inplace(module, 0, log_n, auto_keys, scratch);
@@ -717,30 +529,13 @@ impl SubRam {
     fn write_first_step<DataW: DataRef, K: DataRef, B: Backend>(
         &mut self,
         params: &Parameters<B>,
-        w: &GLWECiphertext<DataW>,
+        w: &GLWE<DataW>,
         n2: usize,
-        auto_keys: &HashMap<i64, GGLWEAutomorphismKeyPrepared<K, B>>,
+        auto_keys: &HashMap<i64, GLWEAutomorphismKeyPrepared<K, B>>,
         scratch: &mut Scratch<B>,
     ) where
-        Module<B>: VecZnxSubInplace + VecZnxAddInplace + VecZnxNormalizeInplace<B>,
-        GGLWEAutomorphismKey<Vec<u8>>: PrepareAlloc<B, GGLWEAutomorphismKeyPrepared<Vec<u8>, B>>,
-        Module<B>: VecZnxDftAllocBytes
-            + VmpApplyDftToDftTmpBytes
-            + VecZnxBigNormalizeTmpBytes
-            + VmpApplyDftToDft<B>
-            + VmpApplyDftToDftAdd<B>
-            + VecZnxDftApply<B>
-            + VecZnxIdftApplyConsume<B>
-            + VecZnxBigAddSmallInplace<B>
-            + VecZnxBigNormalize<B>
-            + VecZnxBigAutomorphismInplace<B>
-            + VecZnxRshInplace<B>
-            + VecZnxCopy
-            + VecZnxNormalizeTmpBytes
-            + VecZnxNormalize<B>
-            + SvpApplyDftToDftInplace<B>
-            + VecZnxBigAddInplace<B>,
-        Scratch<B>: TakeVecZnxDft<B> + ScratchAvailable + TakeVecZnx + TakeVecZnxBig<B>,
+        Module<B>: GLWENormalize<B> + GLWEAdd + GLWESub + GLWETrace<B>,
+        Scratch<B>: ScratchTakeCore<B>,
     {
         assert!(
             self.state,
@@ -750,20 +545,20 @@ impl SubRam {
         let module: &Module<B> = params.module();
         let log_n: usize = module.log_n();
 
-        let glwe_infos: GLWECiphertextLayout = params.glwe_ct_infos();
+        let glwe_infos: GLWELayout = params.glwe_ct_infos();
 
-        let to_write_on: &mut GLWECiphertext<Vec<u8>> = if n2 != 1 {
+        let to_write_on: &mut GLWE<Vec<u8>> = if n2 != 1 {
             &mut self.tree.last_mut().unwrap()[0]
         } else {
             &mut self.data[0]
         };
 
-        let (mut tmp_a, scratch_1) = scratch.take_glwe_ct(&glwe_infos);
+        let (mut tmp_a, scratch_1) = scratch.take_glwe(&glwe_infos);
         tmp_a.trace(module, 0, log_n, to_write_on, auto_keys, scratch_1);
 
-        to_write_on.sub_inplace_ab(module, &tmp_a);
-        to_write_on.add_inplace(module, w);
-        to_write_on.normalize_inplace(module, scratch_1);
+        module.glwe_sub_inplace(to_write_on, &tmp_a);
+        module.glwe_add_inplace(to_write_on, w);
+        module.glwe_normalize_inplace(to_write_on, scratch_1);
     }
 
     fn write_mid_step<DC: DataRef, K: DataRef, B: Backend>(
@@ -771,29 +566,16 @@ impl SubRam {
         step: usize,
         params: &Parameters<B>,
         inv_coordinate: &CoordinatePrepared<DC, B>,
-        auto_keys: &HashMap<i64, GGLWEAutomorphismKeyPrepared<K, B>>,
+        auto_keys: &HashMap<i64, GLWEAutomorphismKeyPrepared<K, B>>,
         scratch: &mut Scratch<B>,
     ) where
-        Scratch<B>: TakeGGSWPrepared<B> + TakeGLWECt,
-        Module<B>: VmpPrepare<B> + GLWEExternalProductInplace<B> + VecZnxSubInplace,
-        Module<B>: VecZnxDftAllocBytes
-            + VmpApplyDftToDftTmpBytes
-            + VecZnxBigNormalizeTmpBytes
-            + VmpApplyDftToDft<B>
-            + VmpApplyDftToDftAdd<B>
-            + VecZnxDftApply<B>
-            + VecZnxIdftApplyConsume<B>
-            + VecZnxBigAddSmallInplace<B>
-            + VecZnxBigNormalize<B>
-            + VecZnxBigAutomorphismInplace<B>
-            + VecZnxRshInplace<B>
-            + VecZnxCopy
-            + VecZnxNormalizeTmpBytes
-            + VecZnxNormalize<B>
-            + VecZnxNormalizeInplace<B>
-            + VecZnxAddInplace
-            + VecZnxRotateInplace<B>,
-        Scratch<B>: TakeVecZnxDft<B> + ScratchAvailable + TakeVecZnx,
+        Module<B>: GLWEExternalProduct<B>
+            + GLWESub
+            + GLWETrace<B>
+            + GLWEAdd
+            + GLWENormalize<B>
+            + GLWERotate<B>,
+        Scratch<B>: ScratchTakeCore<B>,
     {
         let module: &Module<B> = params.module();
         let log_n: usize = module.log_n();
@@ -808,16 +590,16 @@ impl SubRam {
 
         for (j, chunk) in tree_hi.chunks_mut(module.n()).enumerate() {
             // Retrieve the associated polynomial to extract and pack related to the current chunk
-            let ct_lo: &mut GLWECiphertext<Vec<u8>> = &mut tree_lo[j];
+            let ct_lo: &mut GLWE<Vec<u8>> = &mut tree_lo[j];
 
             inv_coordinate.product_inplace(module, ct_lo, scratch);
 
             for ct_hi in chunk.iter_mut() {
                 // Zeroes the first coefficient of ct_hi
                 // ct_hi = [a, b, c, d] - TRACE([a, b, c, d]) = [0, b, c, d]
-                let (mut tmp_a, scratch_1) = scratch.take_glwe_ct(&params.glwe_ct_infos());
+                let (mut tmp_a, scratch_1) = scratch.take_glwe(&params.glwe_ct_infos());
                 tmp_a.trace(module, 0, log_n, ct_hi, auto_keys, scratch_1);
-                ct_hi.sub_inplace_ab(module, &tmp_a);
+                module.glwe_sub_inplace(ct_hi, &tmp_a);
 
                 // Extract the first coefficient ct_lo
                 // tmp_a = TRACE([a, b, c, d]) -> [a, 0, 0, 0]
@@ -825,11 +607,11 @@ impl SubRam {
 
                 // Adds extracted coefficient of ct_lo on ct_hi
                 // [a, 0, 0, 0] + [0, b, c, d]
-                ct_hi.add_inplace(module, &tmp_a);
-                ct_hi.normalize_inplace(module, scratch_1);
+                module.glwe_add_inplace(ct_hi, &tmp_a);
+                module.glwe_normalize_inplace(ct_hi, scratch_1);
 
                 // Cyclic shift ct_lo by X^-1
-                ct_lo.rotate_inplace(module, -1, scratch_1);
+                module.glwe_rotate_inplace(-1, ct_lo, scratch_1);
             }
         }
     }
@@ -840,8 +622,8 @@ impl SubRam {
         inv_coordinate: &CoordinatePrepared<DC, B>,
         scratch: &mut Scratch<B>,
     ) where
-        Scratch<B>: TakeGGSWPrepared<B>,
-        Module<B>: VmpPrepare<B> + GLWEExternalProductInplace<B>,
+        Scratch<B>: ScratchTakeCore<B>,
+        Module<B>: GLWEExternalProduct<B>,
     {
         // Apply the last reverse shift to the top of the tree.
         for ct_lo in self.data.iter_mut() {
