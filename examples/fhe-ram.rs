@@ -1,6 +1,12 @@
 use std::time::Instant;
 
-use poulpy_backend::FFT64Avx;
+#[cfg(any(target_arch = "x86_64", target_arch = "x86"))]
+use poulpy_backend::FFT64Avx as BackendImpl;
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "x86")))]
+use poulpy_backend::FFT64Ref as BackendImpl;
+
+
 use poulpy_core::{
     GLWEDecrypt, GLWEEncryptSk, ScratchTakeCore,
     layouts::{
@@ -17,6 +23,12 @@ use poulpy_hal::{
 use fhe_ram::{Address, EvaluationKeys, EvaluationKeysPrepared, Parameters, Ram};
 use rand_core::RngCore;
 
+fn cast_u8_to_signed(value: u8, bit_length: usize) -> i64 {
+    assert!((1..=8).contains(&bit_length), "bit_length must be between 1 and 8");
+    let shift = 8 - bit_length;
+    ((value << shift) as i8 as i64) >> shift
+}
+
 fn main() {
     println!("Starting!");
 
@@ -29,7 +41,7 @@ fn main() {
     let mut source_xe: Source = Source::new(seed_xe);
 
     // See parameters.rs for configuration
-    let params: Parameters<FFT64Avx> = Parameters::<FFT64Avx>::new();
+    let params: Parameters<BackendImpl> = Parameters::<BackendImpl>::new();
 
     // Generates a new secret-key along with the public evaluation keys.
     let mut sk: GLWESecret<Vec<u8>> = GLWESecret::alloc_from_infos(&params.glwe_ct_infos());
@@ -38,13 +50,13 @@ fn main() {
     let keys: EvaluationKeys<Vec<u8>> =
         EvaluationKeys::encrypt_sk(&params, &sk, &mut source_xa, &mut source_xe);
 
-    let mut scratch: ScratchOwned<FFT64Avx> = ScratchOwned::alloc(1 << 24);
+    let mut scratch: ScratchOwned<BackendImpl> = ScratchOwned::alloc(1 << 24);
 
-    let mut sk_prep: GLWESecretPrepared<Vec<u8>, FFT64Avx> =
+    let mut sk_prep: GLWESecretPrepared<Vec<u8>, BackendImpl> =
         GLWESecretPrepared::alloc(params.module(), sk.rank());
     sk_prep.prepare(params.module(), &sk);
 
-    let mut keys_prepared: EvaluationKeysPrepared<Vec<u8>, FFT64Avx> =
+    let mut keys_prepared: EvaluationKeysPrepared<Vec<u8>, BackendImpl> =
         EvaluationKeysPrepared::alloc(&params);
     keys_prepared.prepare(params.module(), &keys, scratch.borrow());
 
@@ -59,7 +71,7 @@ fn main() {
     source.fill_bytes(data.as_mut_slice());
 
     // Instantiates the FHE-RAM
-    let mut ram: Ram<FFT64Avx> = Ram::new();
+    let mut ram: Ram<BackendImpl> = Ram::new();
 
     // Populates the FHE-RAM
     ram.encrypt_sk(&data, &sk, &mut source_xa, &mut source_xe);
@@ -88,9 +100,9 @@ fn main() {
 
     // Checks correctness
     (0..ws).for_each(|i| {
-        let want: i8 = data[i + ws * idx as usize] as i8;
-        let (decrypted_value, noise) = decrypt_glwe(&params, &ct[i], want as u8, &sk_prep);
-        assert_eq!(decrypted_value, want as i64);
+        let want = cast_u8_to_signed(data[i + ws * idx as usize], params.k_glwe_pt().as_usize()); // 8-bit signed integer
+        let (decrypted_value, noise) = decrypt_glwe(&params, &ct[i], want, &sk_prep);
+        assert_eq!(decrypted_value, want);
         println!("noise: {}", noise);
         assert!(
             noise < -(params.k_glwe_pt().as_usize() as f64 + 1.0),
@@ -111,9 +123,9 @@ fn main() {
 
     // Checks correctness
     (0..ws).for_each(|i| {
-        let want: i8 = data[i + ws * idx as usize] as i8;
-        let (decrypted_value, noise) = decrypt_glwe(&params, &ct[i], want as u8, &sk_prep);
-        assert_eq!(decrypted_value, want as i64);
+        let want = cast_u8_to_signed(data[i + ws * idx as usize], params.k_glwe_pt().as_usize()); // 8-bit signed integer
+        let (decrypted_value, noise) = decrypt_glwe(&params, &ct[i], want, &sk_prep);
+        assert_eq!(decrypted_value, want);
         println!("noise: {}", noise);
         assert!(
             noise < -(params.k_glwe_pt().as_usize() as f64 + 1.0),
@@ -149,9 +161,9 @@ fn main() {
 
     // Checks correctness
     (0..ws).for_each(|i| {
-        let want: i8 = data[i + ws * idx as usize] as i8;
-        let (have, noise) = decrypt_glwe(&params, &ct[i], want as u8, &sk_prep);
-        assert_eq!(have, want as i64);
+        let want = cast_u8_to_signed(data[i + ws * idx as usize], params.k_glwe_pt().as_usize()); // 8-bit signed integer
+        let (decrypted_value, noise) = decrypt_glwe(&params, &ct[i], want, &sk_prep);
+        assert_eq!(decrypted_value, want);
         println!("noise: {}", noise);
         assert!(
             noise < -(params.k_glwe_pt().as_usize() as f64 + 1.0),
@@ -198,7 +210,7 @@ where
 fn decrypt_glwe<B: Backend>(
     params: &Parameters<B>,
     ct: &GLWE<Vec<u8>>,
-    want: u8,
+    want: i64,
     sk: &GLWESecretPrepared<Vec<u8>, B>,
 ) -> (i64, f64)
 where
@@ -214,11 +226,9 @@ where
     ct.decrypt(module, &mut pt, sk, scratch.borrow());
 
     let log_scale: usize = pt.k().as_usize() - params.k_glwe_pt().as_usize();
-    let decrypted_value: i64 = pt.decode_coeff_i64(pt.k(), 0);
-    let diff: i64 = decrypted_value - (((want as i8) as i64) << log_scale);
+    let decrypted_value_before_scale: i64 = pt.decode_coeff_i64(pt.k(), 0);
+    let diff: i64 = decrypted_value_before_scale - (want << log_scale);
     let noise: f64 = (diff.abs() as f64).log2() - pt.k().as_usize() as f64;
-    (
-        (decrypted_value as f64 / f64::exp2(log_scale as f64)).round() as i64,
-        noise,
-    )
+    let decrypted_value: i64 = (decrypted_value_before_scale as f64 / f64::exp2(log_scale as f64)).round() as i64;
+    (decrypted_value,noise)
 }
