@@ -11,16 +11,16 @@ use crate::{Base2D, get_base_2d};
 const LOG_N: u32 = 12;
 const BASE2K: u32 = 17;
 const RANK: u32 = 1;
-const K_GLWE_PT: u32 = u8::BITS;
+const K_GLWE_PT: u32 = 3; //u8::BITS;
 const K_GLWE_CT: u32 = BASE2K * 3;
 const K_GGSW_ADDR: u32 = BASE2K * 4;
 const K_EVK_TRACE: u32 = BASE2K * 4;
 const K_EVK_GGSW_INV: u32 = BASE2K * 5;
-pub const DECOMP_N: [u8; 1] = [12];
+pub const DECOMP_N: [u8; 4] = [3, 3, 3, 3];
 const WORDSIZE: usize = 4;
 const MAX_ADDR: usize = 1 << 14;
 
-pub struct Parameters<B: Backend> {
+pub struct CryptographicParameters<B: Backend> {
     module: Module<B>,              // FFT/NTT tables.
     base2k: Base2K,                 // Torus 2^{-k} decomposition.
     rank: Rank,                     // GLWE/GGLWE/GGSW rank.
@@ -29,27 +29,12 @@ pub struct Parameters<B: Backend> {
     k_ggsw_addr: TorusPrecision,    // Ram address (GGSW) Torus precision.
     k_evk_trace: TorusPrecision,    // Ram trace evaluation key Torus precision
     k_evk_ggsw_inv: TorusPrecision, // Ram GGSW(X^i) -> GGSW(X^-i) evaluation key Torus precision
-    max_addr: usize,                // Maximum supported address.
-    decomp_n: Vec<u8>,              // Digit decomposition of N.
-    word_size: usize,               // Digit decomposition of a Ram word.
 }
 
-impl<B: Backend> Default for Parameters<B>
-where
-    Module<B>: ModuleNew<B>,
-{
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<B: Backend> Parameters<B>
-where
-    Module<B>: ModuleNew<B>,
+impl<B: Backend> CryptographicParameters<B>
+where Module<B>: ModuleNew<B>,
 {
     pub fn new() -> Self {
-        assert!(DECOMP_N.iter().sum::<u8>() == LOG_N as u8);
-
         Self {
             module: Module::<B>::new(1 << LOG_N),
             base2k: BASE2K.into(),
@@ -59,14 +44,11 @@ where
             k_ggsw_addr: K_GGSW_ADDR.into(),
             k_evk_trace: K_EVK_TRACE.into(),
             k_evk_ggsw_inv: K_EVK_GGSW_INV.into(),
-            max_addr: MAX_ADDR,
-            decomp_n: DECOMP_N.to_vec(),
-            word_size: WORDSIZE,
         }
     }
 }
 
-impl<B: Backend> Parameters<B> {
+impl<B: Backend> CryptographicParameters<B> {
     pub fn glwe_pt_infos(&self) -> GLWELayout {
         GLWELayout {
             n: self.module.n().into(),
@@ -120,10 +102,6 @@ impl<B: Backend> Parameters<B> {
         }
     }
 
-    pub fn max_addr(&self) -> usize {
-        self.max_addr
-    }
-
     pub fn module(&self) -> &Module<B> {
         &self.module
     }
@@ -148,16 +126,148 @@ impl<B: Backend> Parameters<B> {
         self.rank
     }
 
-    pub fn word_size(&self) -> usize {
-        self.word_size
-    }
-
     pub(crate) fn k_evk_trace(&self) -> TorusPrecision {
         self.k_evk_trace
     }
 
     pub(crate) fn k_evk_ggsw_inv(&self) -> TorusPrecision {
         self.k_evk_ggsw_inv
+    }
+
+    pub(crate) fn dnum_ct(&self) -> Dnum {
+        self.k_glwe_ct().div_ceil(self.basek()).into()
+    }
+
+    pub(crate) fn dnum_ggsw(&self) -> Dnum {
+        self.k_ggsw_addr().div_ceil(self.basek()).into()
+    }
+
+}
+
+pub struct Parameters<B: Backend> {
+    pub cryptographic_parameters: CryptographicParameters<B>, // Cryptographic parameters.
+    pub max_addr: usize,                // Maximum supported address.
+    pub decomp_n: Vec<u8>,              // Digit decomposition of N.
+    pub word_size: usize,               // Digit decomposition of a Ram word.
+}
+
+impl<B: Backend> Default for Parameters<B>
+where
+    Module<B>: ModuleNew<B>,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<B: Backend> Parameters<B>
+where
+    Module<B>: ModuleNew<B>,
+{
+    pub fn new() -> Self {
+        assert!(DECOMP_N.iter().sum::<u8>() == LOG_N as u8);
+
+        Self {
+            cryptographic_parameters: CryptographicParameters::new(),
+            max_addr: MAX_ADDR,
+            decomp_n: DECOMP_N.to_vec(),
+            word_size: WORDSIZE,
+        }
+    }
+}
+
+impl<B: Backend> Parameters<B> {
+    pub fn glwe_pt_infos(&self) -> GLWELayout {
+        GLWELayout {
+            n: self.cryptographic_parameters.module.n().into(),
+            k: self.k_glwe_pt(),
+            base2k: self.basek(),
+            rank: self.rank(),
+        }
+    }
+
+    pub fn glwe_ct_infos(&self) -> GLWELayout {
+        GLWELayout {
+            n: self.cryptographic_parameters.module.n().into(),
+            k: self.k_glwe_ct(),
+            base2k: self.basek(),
+            rank: self.rank(),
+        }
+    }
+
+    pub fn evk_glwe_infos(&self) -> GGLWELayout {
+        GGLWELayout {
+            n: self.cryptographic_parameters.module.n().into(),
+            base2k: self.basek(),
+            k: self.k_evk_trace(),
+            rank_in: self.rank(),
+            rank_out: self.rank(),
+            dnum: self.dnum_ct(),
+            dsize: Dsize(1),
+        }
+    }
+
+    pub fn evk_ggsw_infos(&self) -> GGLWELayout {
+        GGLWELayout {
+            n: self.cryptographic_parameters.module.n().into(),
+            base2k: self.basek(),
+            k: self.k_evk_ggsw_inv(),
+            rank_in: self.rank(),
+            rank_out: self.rank(),
+            dnum: self.dnum_ggsw(),
+            dsize: Dsize(1),
+        }
+    }
+
+    pub fn ggsw_infos(&self) -> GGSWLayout {
+        GGSWLayout {
+            n: self.cryptographic_parameters.module.n().into(),
+            base2k: self.basek(),
+            k: self.k_ggsw_addr(),
+            rank: self.rank(),
+            dnum: self.dnum_ct(),
+            dsize: Dsize(1),
+        }
+    }
+
+    pub fn max_addr(&self) -> usize {
+        self.max_addr
+    }
+
+    pub fn module(&self) -> &Module<B> {
+        &self.cryptographic_parameters.module
+    }
+
+    pub fn basek(&self) -> Base2K {
+        self.cryptographic_parameters.base2k
+    }
+
+    pub fn k_glwe_ct(&self) -> TorusPrecision {
+        self.cryptographic_parameters.k_glwe_ct
+    }
+
+    pub fn k_glwe_pt(&self) -> TorusPrecision {
+        self.cryptographic_parameters.k_glwe_pt
+    }
+
+    pub(crate) fn k_ggsw_addr(&self) -> TorusPrecision {
+        self.cryptographic_parameters.k_ggsw_addr
+    }
+
+    pub fn rank(&self) -> Rank {
+        self.cryptographic_parameters.rank
+    }
+
+    pub fn word_size(&self) -> usize {
+        self.word_size
+    }
+
+    pub(crate) fn k_evk_trace(&self) -> TorusPrecision {
+        self.cryptographic_parameters.k_evk_trace
+    }
+
+    pub(crate) fn k_evk_ggsw_inv(&self) -> TorusPrecision {
+        self.cryptographic_parameters.k_evk_ggsw_inv
     }
 
     pub(crate) fn dnum_ct(&self) -> Dnum {

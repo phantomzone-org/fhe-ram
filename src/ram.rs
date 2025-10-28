@@ -17,15 +17,14 @@ use poulpy_hal::{
 };
 
 use crate::{
-    Coordinate, CoordinatePrepared, TakeCoordinatePrepared, address::Address,
-    keys::EvaluationKeysPrepared, parameters::Parameters, reverse_bits_msb,
+    Coordinate, CoordinatePrepared, CryptographicParameters, TakeCoordinatePrepared, address::Address, keys::EvaluationKeysPrepared, parameters::Parameters, reverse_bits_msb
 };
 
 /// [Ram] core implementation of the FHE-RAM.
 pub struct Ram<B: Backend> {
-    params: Parameters<B>,
-    subrams: Vec<SubRam>,
-    scratch: ScratchOwned<B>,
+    pub params: Parameters<B>,
+    pub subrams: Vec<SubRam>,
+    pub scratch: ScratchOwned<B>,
 }
 
 impl<B: Backend> Default for Ram<B>
@@ -63,6 +62,24 @@ where
             scratch,
         }
     }
+
+    /// Instantiates a new [Ram].
+    pub fn new_from_ram_params(word_size: usize, decomp_n: Vec<u8>, max_addr: usize) -> Self {
+        let params = Parameters {
+            cryptographic_parameters: CryptographicParameters::new(),
+            max_addr,
+            decomp_n,
+            word_size,
+        };
+        let scratch: ScratchOwned<B> = ScratchOwned::alloc(Self::scratch_bytes(&params));
+        Self {
+            subrams: (0..params.word_size())
+                .map(|_| SubRam::alloc(&params))
+                .collect(),
+            params,
+            scratch,
+        }
+    }    
 }
 
 impl<B: Backend> Ram<B> {
