@@ -1,13 +1,15 @@
-pub mod address;
-pub mod base;
-pub mod coordinate;
-pub mod coordinate_prepared;
-pub mod keys;
-pub mod parameters;
-pub mod ram;
+mod address;
+mod base;
+mod conversion;
+mod coordinate;
+mod coordinate_prepared;
+mod keys;
+mod parameters;
+mod ram;
 
 pub use address::*;
 pub(crate) use base::*;
+pub use conversion::*;
 pub(crate) use coordinate::*;
 pub(crate) use coordinate_prepared::*;
 pub use keys::*;

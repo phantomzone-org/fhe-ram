@@ -6,8 +6,8 @@ use poulpy_hal::{
 use poulpy_core::{
     GGSWAutomorphism, GLWEExternalProduct, ScratchTakeCore,
     layouts::{
-        GGLWEInfos, GGLWEPreparedToRef, GGSWInfos, GGSWPrepared, GGSWPreparedFactory, GLWEInfos,
-        GLWETensorKeyPreparedToRef, GLWEToMut, GLWEToRef, GetGaloisElement, LWEInfos,
+        GGLWEInfos, GGLWEPreparedToRef, GGLWEToGGSWKeyPreparedToRef, GGSWInfos, GGSWPrepared,
+        GGSWPreparedFactory, GLWEInfos, GLWEToMut, GLWEToRef, GetGaloisElement, LWEInfos,
     },
 };
 
@@ -127,7 +127,7 @@ impl<D: DataMut, B: Backend> CoordinatePrepared<D, B> {
         scratch: &mut Scratch<B>,
     ) where
         G: GGLWEPreparedToRef<B> + GetGaloisElement + GGLWEInfos,
-        T: GLWETensorKeyPreparedToRef<B>,
+        T: GGLWEToGGSWKeyPreparedToRef<B>,
         M: GGSWAutomorphism<B> + GGSWPreparedFactory<B>,
         Scratch<B>: ScratchTakeCore<B>,
     {

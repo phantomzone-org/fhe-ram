@@ -32,7 +32,8 @@ pub struct CryptographicParameters<B: Backend> {
 }
 
 impl<B: Backend> CryptographicParameters<B>
-where Module<B>: ModuleNew<B>,
+where
+    Module<B>: ModuleNew<B>,
 {
     pub fn new() -> Self {
         Self {
@@ -141,14 +142,13 @@ impl<B: Backend> CryptographicParameters<B> {
     pub(crate) fn dnum_ggsw(&self) -> Dnum {
         self.k_ggsw_addr().div_ceil(self.basek()).into()
     }
-
 }
 
 pub struct Parameters<B: Backend> {
     pub cryptographic_parameters: CryptographicParameters<B>, // Cryptographic parameters.
-    pub max_addr: usize,                // Maximum supported address.
-    pub decomp_n: Vec<u8>,              // Digit decomposition of N.
-    pub word_size: usize,               // Digit decomposition of a Ram word.
+    pub max_addr: usize,                                      // Maximum supported address.
+    pub decomp_n: Vec<u8>,                                    // Digit decomposition of N.
+    pub word_size: usize,                                     // Digit decomposition of a Ram word.
 }
 
 impl<B: Backend> Default for Parameters<B>

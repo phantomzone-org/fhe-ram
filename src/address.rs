@@ -6,7 +6,7 @@ use poulpy_hal::{
 
 use poulpy_core::{
     GGSWEncryptSk, ScratchTakeCore,
-    layouts::{GGSWInfos, GGSWLayout, GLWEInfos, GLWESecret, GLWESecretPreparedFactory, LWEInfos},
+    layouts::{GGSWInfos, GLWEInfos, GLWESecret, GLWESecretPreparedFactory, LWEInfos},
 };
 
 use crate::{Base2D, Coordinate, parameters::Parameters};
@@ -55,15 +55,19 @@ impl<D: Data> GGSWInfos for Address<D> {
 
 impl Address<Vec<u8>> {
     /// Allocates a new [Address].
-    pub fn alloc<B: Backend>(params: &Parameters<B>) -> Self {
-        let base_2d: Base2D = params.base2d();
-        let ggsw_infos: GGSWLayout = params.ggsw_infos();
+    pub fn alloc_from_params<B: Backend>(params: &Parameters<B>) -> Self {
+        Self::alloc_from_infos(&params.ggsw_infos(), &params.base2d())
+    }
 
+    pub fn alloc_from_infos<A>(infos: &A, base_2d: &Base2D) -> Self
+    where
+        A: GGSWInfos,
+    {
         Self {
             coordinates: base_2d
                 .0
                 .iter()
-                .map(|base1d| Coordinate::alloc(&ggsw_infos, base1d))
+                .map(|base1d| Coordinate::alloc(infos, base1d))
                 .collect(),
             base2d: base_2d.clone(),
         }

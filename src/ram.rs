@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use itertools::izip;
 use poulpy_core::{
     GGSWAutomorphism, GLWEAdd, GLWECopy, GLWEEncryptSk, GLWEExternalProduct, GLWENormalize,
-    GLWEPacker, GLWEPacking, GLWERotate, GLWESub, GLWETrace, GetDistribution, ScratchTakeCore,
+    GLWEPacker, GLWEPackerOps, GLWERotate, GLWESub, GLWETrace, GetDistribution, ScratchTakeCore,
     layouts::{
-        GGLWELayout, GGSWInfos, GGSWLayout, GGSWPreparedFactory, GLWE, GLWEAutomorphismKeyPrepared,
-        GLWEInfos, GLWELayout, GLWESecret, GLWESecretPreparedFactory, GLWESecretToRef,
-        GLWETensorKeyPrepared, LWEInfos,
+        GGLWELayout, GGLWEToGGSWKeyPrepared, GGSWInfos, GGSWLayout, GGSWPreparedFactory, GLWE,
+        GLWEAutomorphismKeyPrepared, GLWEInfos, GLWELayout, GLWESecret, GLWESecretPreparedFactory,
+        GLWESecretToRef, LWEInfos,
     },
 };
 use poulpy_hal::{
@@ -17,7 +17,8 @@ use poulpy_hal::{
 };
 
 use crate::{
-    Coordinate, CoordinatePrepared, CryptographicParameters, TakeCoordinatePrepared, address::Address, keys::EvaluationKeysPrepared, parameters::Parameters, reverse_bits_msb
+    Coordinate, CoordinatePrepared, CryptographicParameters, TakeCoordinatePrepared,
+    address::Address, keys::EvaluationKeysPrepared, parameters::Parameters, reverse_bits_msb,
 };
 
 /// [Ram] core implementation of the FHE-RAM.
@@ -30,10 +31,12 @@ pub struct Ram<B: Backend> {
 impl<B: Backend> Default for Ram<B>
 where
     Module<B>: ModuleNew<B>
-        + GLWEPacking<B>
         + GLWEEncryptSk<B>
         + GGSWPreparedFactory<B>
-        + GGSWAutomorphism<B>,
+        + GGSWAutomorphism<B>
+        + GLWEExternalProduct<B>
+        + GLWEPackerOps<B>
+        + GLWETrace<B>,
     ScratchOwned<B>: ScratchOwnedAlloc<B>,
 {
     fn default() -> Self {
@@ -44,10 +47,12 @@ where
 impl<B: Backend> Ram<B>
 where
     Module<B>: ModuleNew<B>
-        + GLWEPacking<B>
         + GLWEEncryptSk<B>
         + GGSWPreparedFactory<B>
-        + GGSWAutomorphism<B>,
+        + GGSWAutomorphism<B>
+        + GLWEExternalProduct<B>
+        + GLWEPackerOps<B>
+        + GLWETrace<B>,
     ScratchOwned<B>: ScratchOwnedAlloc<B>,
 {
     /// Instantiates a new [Ram].
@@ -79,14 +84,19 @@ where
             params,
             scratch,
         }
-    }    
+    }
 }
 
 impl<B: Backend> Ram<B> {
     /// Scratch space size required by the [Ram].
     pub(crate) fn scratch_bytes(params: &Parameters<B>) -> usize
     where
-        Module<B>: GLWEPacking<B> + GLWEEncryptSk<B> + GGSWPreparedFactory<B> + GGSWAutomorphism<B>,
+        Module<B>: GLWEPackerOps<B>
+            + GLWEEncryptSk<B>
+            + GGSWPreparedFactory<B>
+            + GGSWAutomorphism<B>
+            + GLWEExternalProduct<B>
+            + GLWETrace<B>,
     {
         let module: &Module<B> = params.module();
         let glwe_infos: GLWELayout = params.glwe_ct_infos();
@@ -165,7 +175,7 @@ impl<B: Backend> Ram<B> {
         keys: &EvaluationKeysPrepared<D, B>,
     ) -> Vec<GLWE<Vec<u8>>>
     where
-        Module<B>: GGSWPreparedFactory<B> + GLWEExternalProduct<B> + GLWEPacking<B>,
+        Module<B>: GGSWPreparedFactory<B> + GLWEExternalProduct<B> + GLWEPackerOps<B>,
         ScratchOwned<B>: ScratchOwnedBorrow<B>,
         Scratch<B>: ScratchTakeCore<B>,
     {
@@ -189,7 +199,7 @@ impl<B: Backend> Ram<B> {
         keys: &EvaluationKeysPrepared<D, B>,
     ) -> Vec<GLWE<Vec<u8>>>
     where
-        Module<B>: GGSWPreparedFactory<B> + GLWEExternalProduct<B> + GLWEPacking<B>,
+        Module<B>: GGSWPreparedFactory<B> + GLWEExternalProduct<B> + GLWECopy + GLWEPackerOps<B>,
         ScratchOwned<B>: ScratchOwnedBorrow<B>,
         Scratch<B>: ScratchTakeCore<B>,
     {
@@ -225,7 +235,8 @@ impl<B: Backend> Ram<B> {
             + GLWEAdd
             + GLWESub
             + GLWETrace<B>
-            + GLWERotate<B>,
+            + GLWERotate<B>
+            + GLWEExternalProduct<B>,
         ScratchOwned<B>: ScratchOwnedBorrow<B>,
         Scratch<B>: ScratchTakeCore<B>,
     {
@@ -237,7 +248,7 @@ impl<B: Backend> Ram<B> {
         let scratch: &mut Scratch<B> = self.scratch.borrow();
         let atk_glwe: &HashMap<i64, GLWEAutomorphismKeyPrepared<K, B>> = &keys.atk_glwe;
         let atk_ggsw_inv: &GLWEAutomorphismKeyPrepared<K, B> = &keys.atk_ggsw_inv;
-        let tsk_ggsw_inv: &GLWETensorKeyPrepared<K, B> = &keys.tsk_ggsw_inv;
+        let tsk_ggsw_inv: &GGLWEToGGSWKeyPrepared<K, B> = &keys.tsk_ggsw_inv;
 
         // Overwrites the coefficient that was read: to_write_on = to_write_on - TRACE(to_write_on) + w
         for (i, subram) in self.subrams.iter_mut().enumerate() {
@@ -376,7 +387,7 @@ impl SubRam {
         scratch: &mut Scratch<B>,
     ) -> GLWE<Vec<u8>>
     where
-        Module<B>: GGSWPreparedFactory<B> + GLWEExternalProduct<B> + GLWEPacking<B>,
+        Module<B>: GGSWPreparedFactory<B> + GLWEExternalProduct<B> + GLWEPackerOps<B>,
         Scratch<B>: ScratchTakeCore<B> + TakeCoordinatePrepared<B>,
     {
         assert!(
@@ -455,7 +466,7 @@ impl SubRam {
         scratch: &mut Scratch<B>,
     ) -> GLWE<Vec<u8>>
     where
-        Module<B>: GGSWPreparedFactory<B> + GLWEExternalProduct<B> + GLWEPacking<B>,
+        Module<B>: GGSWPreparedFactory<B> + GLWEExternalProduct<B> + GLWECopy + GLWEPackerOps<B>,
         Scratch<B>: ScratchTakeCore<B> + TakeCoordinatePrepared<B>,
     {
         assert!(
@@ -500,28 +511,15 @@ impl SubRam {
                     for i in 0..module.n() {
                         let i_rev: usize = reverse_bits_msb(i, log_n as u32);
                         if i_rev < chunk.len() {
-                            packer.add(
-                                module,
-                                // &mut result_next,
-                                Some(&chunk[i_rev]),
-                                auto_keys,
-                                scratch,
-                            );
+                            packer.add(module, Some(&chunk[i_rev]), auto_keys, scratch);
                         } else {
-                            packer.add(
-                                module,
-                                // &mut result_next, // TODO : is it okay that this isn't Bing used?
-                                None::<&GLWE<Vec<u8>>>,
-                                auto_keys,
-                                scratch,
-                            );
+                            packer.add(module, None::<&GLWE<Vec<u8>>>, auto_keys, scratch);
                         }
                     }
                 }
 
-                packer.flush(module, &mut tmp_ct); //result_next, auto_keys, scratch);
+                packer.flush(module, &mut tmp_ct);
                 results.push(tmp_ct.clone());
-                // packer.reset();
 
                 // Stores the packed polynomial
                 izip!(self.tree[i].iter_mut(), results.iter()).for_each(|(a, b)| {

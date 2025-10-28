@@ -43,9 +43,9 @@ checksum = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43"
 
 [[package]]
 name = "bytemuck"
-version = "1.23.2"
+version = "1.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3995eaeebcdf32f91f980d360f78732ddc061097ab4e39991ae7a6ace9194677"
+checksum = "1fbdf580320f38b612e485521afda1ee26d10cc9884efaaa750d383e13e3c5f4"
 
 [[package]]
 name = "byteorder"
@@ -366,9 +366,7 @@ dependencies = [
 
 [[package]]
 name = "poulpy-backend"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bd7cadc6e9f3c49ee9cdc86afde18f228e9d40dd498d42fff86382e5570575b"
+version = "0.3.2"
 dependencies = [
  "byteorder",
  "cmake",
@@ -385,10 +383,9 @@ dependencies = [
 
 [[package]]
 name = "poulpy-core"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af63c0f909cfa4141225be3d0cd2c4ebb7597f472f26873de7fc4cf5cd997778"
+version = "0.3.2"
 dependencies = [
+ "bytemuck",
  "byteorder",
  "criterion",
  "itertools 0.14.0",
@@ -400,9 +397,7 @@ dependencies = [
 
 [[package]]
 name = "poulpy-hal"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eaf09278454f493816c4570d44cb0d63290ff8af8b87d25971edbb3aa15c0d46"
+version = "0.3.2"
 dependencies = [
  "bytemuck",
  "byteorder",
@@ -419,9 +414,7 @@ dependencies = [
 
 [[package]]
 name = "poulpy-schemes"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84a4777dc9fc3eb6e24e2d820348459ddd2c23399eff4b30c5ff4c0ad3ef1bea"
+version = "0.3.3"
 dependencies = [
  "byteorder",
  "criterion",

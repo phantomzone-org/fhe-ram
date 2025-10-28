@@ -6,7 +6,6 @@ use poulpy_backend::FFT64Avx as BackendImpl;
 #[cfg(not(any(target_arch = "x86_64", target_arch = "x86")))]
 use poulpy_backend::FFT64Ref as BackendImpl;
 
-
 use poulpy_core::{
     GLWEDecrypt, GLWEEncryptSk, ScratchTakeCore,
     layouts::{
@@ -24,7 +23,10 @@ use fhe_ram::{Address, EvaluationKeys, EvaluationKeysPrepared, Parameters, Ram};
 use rand_core::RngCore;
 
 fn cast_u8_to_signed(value: u8, bit_length: usize) -> i64 {
-    assert!((1..=8).contains(&bit_length), "bit_length must be between 1 and 8");
+    assert!(
+        (1..=8).contains(&bit_length),
+        "bit_length must be between 1 and 8"
+    );
     let shift = 8 - bit_length;
     ((value << shift) as i8 as i64) >> shift
 }
@@ -77,7 +79,7 @@ fn main() {
     ram.encrypt_sk(&data, &sk, &mut source_xa, &mut source_xe);
 
     // Allocates an encrypted address.
-    let mut addr: Address<Vec<u8>> = Address::alloc(&params);
+    let mut addr: Address<Vec<u8>> = Address::alloc_from_params(&params);
 
     // Random index
     let idx: u32 = source.next_u32() % params.max_addr() as u32;
@@ -229,6 +231,7 @@ where
     let decrypted_value_before_scale: i64 = pt.decode_coeff_i64(pt.k(), 0);
     let diff: i64 = decrypted_value_before_scale - (want << log_scale);
     let noise: f64 = (diff.abs() as f64).log2() - pt.k().as_usize() as f64;
-    let decrypted_value: i64 = (decrypted_value_before_scale as f64 / f64::exp2(log_scale as f64)).round() as i64;
-    (decrypted_value,noise)
+    let decrypted_value: i64 =
+        (decrypted_value_before_scale as f64 / f64::exp2(log_scale as f64)).round() as i64;
+    (decrypted_value, noise)
 }
