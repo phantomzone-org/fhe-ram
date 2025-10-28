@@ -7,17 +7,17 @@ use poulpy_hal::{
     layouts::{Backend, DataMut, DataRef, Module, ScalarZnx, Scratch, ZnxViewMut},
 };
 use poulpy_schemes::tfhe::bdd_arithmetic::{
-    FheUintBlocksPrepared, GGSWBlindRotation, UnsignedInteger,
+    FheUintPrepared, GGSWBlindRotation, UnsignedInteger
 };
 
 use crate::Address;
 
-impl<T: UnsignedInteger, BE: Backend> FheUintBlocksToAddress<T, BE> for Module<BE> where
+impl<T: UnsignedInteger, BE: Backend> FHEUintBlocksToAddress<T, BE> for Module<BE> where
     Self: ModuleN + GGSWBlindRotation<T, BE>
 {
 }
 
-pub trait FheUintBlocksToAddress<T: UnsignedInteger, BE: Backend>
+pub trait FHEUintBlocksToAddress<T: UnsignedInteger, BE: Backend>
 where
     Self: ModuleN + GGSWBlindRotation<T, BE>,
 {
@@ -32,7 +32,7 @@ where
     fn fhe_uint_blocks_to_address<DM, DR>(
         &self,
         res: &mut Address<DM>,
-        fheuint: &FheUintBlocksPrepared<DR, T, BE>,
+        fheuint: &FheUintPrepared<DR, T, BE>,
         scratch: &mut Scratch<BE>,
     ) where
         DM: DataMut,
@@ -71,12 +71,12 @@ impl<D: DataMut> Address<D> {
     pub fn set_from_fheuint<F, T, M, BE: Backend>(
         &mut self,
         module: &M,
-        fheuint: &FheUintBlocksPrepared<F, T, BE>,
+        fheuint: &FheUintPrepared<F, T, BE>,
         scratch: &mut Scratch<BE>,
     ) where
         F: DataRef,
         T: UnsignedInteger,
-        M: FheUintBlocksToAddress<T, BE>,
+        M: FHEUintBlocksToAddress<T, BE>,
         Scratch<BE>: ScratchTakeCore<BE>,
     {
         module.fhe_uint_blocks_to_address(self, fheuint, scratch);
@@ -93,7 +93,7 @@ impl Address<Vec<u8>> {
         A: GLWEInfos,
         B: GGSWInfos,
         T: UnsignedInteger,
-        M: FheUintBlocksToAddress<T, BE>,
+        M: FHEUintBlocksToAddress<T, BE>,
     {
         module.fhe_uint_blocks_to_address_tmp_bytes(res_infos, fheuint_infos)
     }
@@ -114,7 +114,7 @@ fn test_fhe_uint_blocks_to_address() {
         layouts::{Module, ScalarZnx, ScratchOwned, ZnxViewMut},
         source::Source,
     };
-    use poulpy_schemes::tfhe::bdd_arithmetic::FheUintBlocksPrepared;
+
     use rand_core::RngCore;
 
     use crate::{Base1D, Base2D};
@@ -168,8 +168,8 @@ fn test_fhe_uint_blocks_to_address() {
 
     let k: u32 = source.next_u32();
 
-    let mut fheuint: FheUintBlocksPrepared<Vec<u8>, u32, FFT64Ref> =
-        FheUintBlocksPrepared::<Vec<u8>, u32, FFT64Ref>::alloc(&module, &ggsw_k_infos);
+    let mut fheuint: FheUintPrepared<Vec<u8>, u32, FFT64Ref> =
+        FheUintPrepared::<Vec<u8>, u32, FFT64Ref>::alloc(&module, &ggsw_k_infos);
     fheuint.encrypt_sk(
         &module,
         k,
