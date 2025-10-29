@@ -1,14 +1,14 @@
 use poulpy_core::{
     ScratchTakeCore,
-    layouts::{GGSWInfos, GLWEInfos},
+    layouts::{GGSWInfos, GGSWLayout, GLWEAutomorphismKeyLayout, GLWEInfos, GLWETensorKeyLayout, GLWEToLWEKeyLayout},
 };
 use poulpy_hal::{
     api::ModuleN,
     layouts::{Backend, DataMut, DataRef, Module, ScalarZnx, Scratch, ZnxViewMut},
 };
-use poulpy_schemes::tfhe::bdd_arithmetic::{
-    FheUintPrepared, GGSWBlindRotation, UnsignedInteger
-};
+use poulpy_schemes::tfhe::{bdd_arithmetic::{
+    BDDKey, BDDKeyLayout, BDDKeyPrepared, FheUint, FheUintBlocksPrepare, FheUintBlocksPreparedFactory, FheUintPrepared, GGSWBlindRotation, UnsignedInteger
+}, blind_rotation::{BlindRotationAlgo, BlindRotationKeyLayout, CGGI}, circuit_bootstrapping::CircuitBootstrappingKeyLayout};
 
 use crate::Address;
 
@@ -68,10 +68,10 @@ where
 }
 
 impl<D: DataMut> Address<D> {
-    pub fn set_from_fheuint<F, T, M, BE: Backend>(
+    pub fn set_from_fheuint_prepared<F, T, M, BE: Backend>(
         &mut self,
         module: &M,
-        fheuint: &FheUintPrepared<F, T, BE>,
+        fheuint_prepared: &FheUintPrepared<F, T, BE>,
         scratch: &mut Scratch<BE>,
     ) where
         F: DataRef,
@@ -79,8 +79,27 @@ impl<D: DataMut> Address<D> {
         M: FHEUintBlocksToAddress<T, BE>,
         Scratch<BE>: ScratchTakeCore<BE>,
     {
-        module.fhe_uint_blocks_to_address(self, fheuint, scratch);
+        module.fhe_uint_blocks_to_address(self, fheuint_prepared, scratch);
     }
+
+    pub fn set_from_fheuint<F, T, M, BRA: BlindRotationAlgo, BE: Backend>(
+        &mut self,
+        module: &M,
+        fheuint: &FheUint<F, T>,
+        bdd_key_prepared: &BDDKeyPrepared<F, BRA, BE>,
+        ggsw_infos: &GGSWLayout,
+        scratch: &mut Scratch<BE>,
+    ) where
+        F: DataRef + DataMut,
+        T: UnsignedInteger,
+        M: FheUintBlocksPreparedFactory<T, BE> + FheUintBlocksPrepare<BRA, T, BE> + FHEUintBlocksToAddress<T, BE>,
+        Scratch<BE>: ScratchTakeCore<BE>,
+    {
+        let mut fheuint_prepared = FheUintPrepared::alloc(module, ggsw_infos);
+        fheuint_prepared.prepare(module, &fheuint, &bdd_key_prepared, scratch);
+
+        self.set_from_fheuint_prepared(module, &fheuint_prepared, scratch);
+    }    
 }
 
 impl Address<Vec<u8>> {
@@ -197,7 +216,7 @@ fn test_fhe_uint_blocks_to_address() {
 
     let mut address: Address<Vec<u8>> = Address::alloc_from_infos(&ggsw_res_infos, &base_2d);
 
-    address.set_from_fheuint(&module, &fheuint, scratch.borrow());
+    address.set_from_fheuint_prepared(&module, &fheuint, scratch.borrow());
 
     let mut bit_rsh: usize = 0;
     for coordinate in address.coordinates.iter_mut() {
