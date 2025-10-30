@@ -6,9 +6,7 @@ use poulpy_hal::{
     api::ModuleN,
     layouts::{Backend, DataMut, DataRef, Module, ScalarZnx, Scratch, ZnxViewMut},
 };
-use poulpy_schemes::tfhe::bdd_arithmetic::{
-    FheUintPrepared, GGSWBlindRotation, UnsignedInteger
-};
+use poulpy_schemes::tfhe::bdd_arithmetic::{FheUintPrepared, GGSWBlindRotation, UnsignedInteger};
 
 use crate::Address;
 
@@ -105,8 +103,8 @@ fn test_fhe_uint_blocks_to_address() {
     use poulpy_core::{
         SIGMA,
         layouts::{
-            Base2K, Degree, Dnum, Dsize, GGSWLayout, GLWESecret, GLWESecretPrepared,
-            LWEInfos, Rank, TorusPrecision,
+            Base2K, Degree, Dnum, Dsize, GGSWLayout, GLWESecret, GLWESecretPrepared, LWEInfos,
+            Rank, TorusPrecision,
         },
     };
     use poulpy_hal::{
@@ -169,7 +167,7 @@ fn test_fhe_uint_blocks_to_address() {
     let k: u32 = source.next_u32();
 
     let mut fheuint: FheUintPrepared<Vec<u8>, u32, FFT64Ref> =
-        FheUintPrepared::<Vec<u8>, u32, FFT64Ref>::alloc(&module, &ggsw_k_infos);
+        FheUintPrepared::<Vec<u8>, u32, FFT64Ref>::alloc_from_infos(&module, &ggsw_k_infos);
     fheuint.encrypt_sk(
         &module,
         k,
