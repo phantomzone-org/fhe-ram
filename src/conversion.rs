@@ -95,7 +95,7 @@ impl<D: DataMut> Address<D> {
         M: FheUintBlocksPreparedFactory<T, BE> + FheUintBlocksPrepare<BRA, T, BE> + FHEUintBlocksToAddress<T, BE>,
         Scratch<BE>: ScratchTakeCore<BE>,
     {
-        let mut fheuint_prepared = FheUintPrepared::alloc(module, ggsw_infos);
+        let mut fheuint_prepared = FheUintPrepared::alloc_from_infos(module, ggsw_infos);
         fheuint_prepared.prepare(module, &fheuint, &bdd_key_prepared, scratch);
 
         self.set_from_fheuint_prepared(module, &fheuint_prepared, scratch);
@@ -124,8 +124,8 @@ fn test_fhe_uint_blocks_to_address() {
     use poulpy_core::{
         SIGMA,
         layouts::{
-            Base2K, Degree, Dnum, Dsize, GGSWLayout, GLWESecret, GLWESecretPrepared,
-            LWEInfos, Rank, TorusPrecision,
+            Base2K, Degree, Dnum, Dsize, GGSWLayout, GLWESecret, GLWESecretPrepared, LWEInfos,
+            Rank, TorusPrecision,
         },
     };
     use poulpy_hal::{
@@ -188,7 +188,7 @@ fn test_fhe_uint_blocks_to_address() {
     let k: u32 = source.next_u32();
 
     let mut fheuint: FheUintPrepared<Vec<u8>, u32, FFT64Ref> =
-        FheUintPrepared::<Vec<u8>, u32, FFT64Ref>::alloc(&module, &ggsw_k_infos);
+        FheUintPrepared::<Vec<u8>, u32, FFT64Ref>::alloc_from_infos(&module, &ggsw_k_infos);
     fheuint.encrypt_sk(
         &module,
         k,
