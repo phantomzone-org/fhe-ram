@@ -1,4 +1,5 @@
 mod address;
+mod arithmetic;
 mod base;
 mod conversion;
 mod coordinate;
@@ -9,6 +10,7 @@ mod ram;
 mod store;
 
 pub use address::*;
+pub use arithmetic::*;
 pub(crate) use base::*;
 pub use conversion::*;
 pub(crate) use coordinate::*;

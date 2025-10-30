@@ -10,3 +10,5 @@ poulpy-backend =  {path="../poulpy/poulpy-backend"}
 poulpy-schemes =  {path="../poulpy/poulpy-schemes"}
 rand_core = "0.9.3"
 itertools = "0.14.0"
+strum = "0.27.2"
+strum_macros = "0.27.2"
