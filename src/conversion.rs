@@ -1,14 +1,18 @@
 use poulpy_core::{
     ScratchTakeCore,
-    layouts::{GGSWInfos, GGSWLayout, GLWEAutomorphismKeyLayout, GLWEInfos, GLWETensorKeyLayout, GLWEToLWEKeyLayout},
+    layouts::{GGSWInfos, GGSWLayout, GLWEInfos},
 };
 use poulpy_hal::{
     api::ModuleN,
     layouts::{Backend, DataMut, DataRef, Module, ScalarZnx, Scratch, ZnxViewMut},
 };
-use poulpy_schemes::tfhe::{bdd_arithmetic::{
-    BDDKey, BDDKeyLayout, BDDKeyPrepared, FheUint, FheUintBlocksPrepare, FheUintBlocksPreparedFactory, FheUintPrepared, GGSWBlindRotation, UnsignedInteger
-}, blind_rotation::{BlindRotationAlgo, BlindRotationKeyLayout, CGGI}, circuit_bootstrapping::CircuitBootstrappingKeyLayout};
+use poulpy_schemes::tfhe::{
+    bdd_arithmetic::{
+        BDDKeyPrepared, FheUint, FheUintBlocksPrepare, FheUintBlocksPreparedFactory,
+        FheUintPrepared, GGSWBlindRotation, UnsignedInteger,
+    },
+    blind_rotation::BlindRotationAlgo,
+};
 
 use crate::Address;
 
@@ -92,14 +96,16 @@ impl<D: DataMut> Address<D> {
     ) where
         F: DataRef + DataMut,
         T: UnsignedInteger,
-        M: FheUintBlocksPreparedFactory<T, BE> + FheUintBlocksPrepare<BRA, T, BE> + FHEUintBlocksToAddress<T, BE>,
+        M: FheUintBlocksPreparedFactory<T, BE>
+            + FheUintBlocksPrepare<BRA, T, BE>
+            + FHEUintBlocksToAddress<T, BE>,
         Scratch<BE>: ScratchTakeCore<BE>,
     {
         let mut fheuint_prepared = FheUintPrepared::alloc_from_infos(module, ggsw_infos);
         fheuint_prepared.prepare(module, &fheuint, &bdd_key_prepared, scratch);
 
         self.set_from_fheuint_prepared(module, &fheuint_prepared, scratch);
-    }    
+    }
 }
 
 impl Address<Vec<u8>> {

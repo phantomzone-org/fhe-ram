@@ -3,16 +3,49 @@ use poulpy_core::{
     layouts::{GGLWEInfos, GGLWEPreparedToRef, GLWEAutomorphismKeyHelper, GetGaloisElement},
 };
 use poulpy_hal::layouts::{Backend, DataMut, DataRef, Module, Scratch};
-use poulpy_schemes::tfhe::bdd_arithmetic::{
-    Add, And, ExecuteBDDCircuit2WTo1W, FheUint, FheUintPrepared, GLWEBlindRotation, Or, Sll, Slt,
-    Sltu, Sra, Srl, Sub, UnsignedInteger, Xor,
+use poulpy_schemes::{
+    define_bdd_2w_to_1w_trait, impl_bdd_2w_to_1w_trait,
+    tfhe::bdd_arithmetic::{
+        Add, And, ExecuteBDDCircuit2WTo1W, FheUint, FheUintPrepared, GLWEBlindRotation, Or, Sll,
+        Slt, Sltu, Sra, Srl, Sub, UnsignedInteger, Xor,
+    },
 };
 
 use strum_macros::EnumIter;
 
+define_bdd_2w_to_1w_trait!(pub Auipc, auipc);
+impl_bdd_2w_to_1w_trait!(
+    Auipc,
+    auipc,
+    u32,
+    crate::codegen::codegen_auipc::AnyBitCircuit,
+    crate::codegen::codegen_auipc::OUTPUT_CIRCUITS
+);
+
+define_bdd_2w_to_1w_trait!(pub Jalr, jalr);
+impl_bdd_2w_to_1w_trait!(
+    Jalr,
+    jalr,
+    u32,
+    crate::codegen::codegen_jalr::AnyBitCircuit,
+    crate::codegen::codegen_jalr::OUTPUT_CIRCUITS
+);
+
+define_bdd_2w_to_1w_trait!(pub Lui, lui);
+impl_bdd_2w_to_1w_trait!(
+    Lui,
+    lui,
+    u32,
+    crate::codegen::codegen_lui::AnyBitCircuit,
+    crate::codegen::codegen_lui::OUTPUT_CIRCUITS
+);
+
 #[derive(Debug, EnumIter)]
 pub enum RVI32ArithmeticOps {
     None,
+    Lui,
+    Jalr,
+    Auipc,
     Addi,
     Slti,
     Sltiu,
@@ -65,7 +98,7 @@ impl<BE: Backend> Evaluate<u32, BE> for RVI32ArithmeticOps {
         rs1: &FheUintPrepared<A, u32, BE>,
         rs2: &FheUintPrepared<B, u32, BE>,
         imm: &FheUintPrepared<I, u32, BE>,
-        _pc: &FheUintPrepared<P, u32, BE>,
+        pc: &FheUintPrepared<P, u32, BE>,
         key: &H,
         scratch: &mut Scratch<BE>,
     ) where
@@ -81,6 +114,9 @@ impl<BE: Backend> Evaluate<u32, BE> for RVI32ArithmeticOps {
     {
         match self {
             Self::None => {}
+            Self::Auipc => res.auipc(module, pc, imm, key, scratch),
+            Self::Jalr => res.auipc(module, pc, pc, key, scratch), // ok? second input is not used
+            Self::Lui => res.lui(module, imm, imm, key, scratch),
             Self::Add => res.add(module, rs1, rs2, key, scratch),
             Self::Sub => res.sub(module, rs1, rs2, key, scratch),
             Self::Sll => res.sll(module, rs1, rs2, key, scratch),
@@ -206,7 +242,6 @@ where
             }
         }
         self.glwe_rotate_inplace(n as i64, rd, scratch);
-     
     }
 
     fn select_rd<RD, O, K, H>(
@@ -393,7 +428,10 @@ fn test_vm_arithmetic_rvi32_fft64_ref() {
     let mut i: usize = 0;
     for op in RVI32ArithmeticOps::iter() {
         let value = rd_enc.decrypt(&module, &sk_prep, scratch.borrow());
-        println!("{:2} -- {:?}: rs1: {rs1} rs2: {rs2} imm: {imm} pc: {pc} -> {}", i, op, value);
+        println!(
+            "{:2} -- {:?}: rs1: {rs1} rs2: {rs2} imm: {imm} pc: {pc} -> {}",
+            i, op, value
+        );
         values.push(value);
         module.glwe_rotate_inplace(-1, &mut rd_enc, scratch.borrow());
         i += 1;
@@ -403,7 +441,13 @@ fn test_vm_arithmetic_rvi32_fft64_ref() {
 
     module.select_rd(&mut rd_enc, &op_id_enc, num_ops, &keys, scratch.borrow());
 
-    println!("op_id: {} -> {}", op_id,  rd_enc.decrypt(&module, &sk_prep, scratch.borrow()));
-    assert_eq!(values[op_id as usize], rd_enc.decrypt(&module, &sk_prep, scratch.borrow()))
-
+    println!(
+        "op_id: {} -> {}",
+        op_id,
+        rd_enc.decrypt(&module, &sk_prep, scratch.borrow())
+    );
+    assert_eq!(
+        values[op_id as usize],
+        rd_enc.decrypt(&module, &sk_prep, scratch.borrow())
+    )
 }

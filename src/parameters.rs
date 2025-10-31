@@ -1,11 +1,15 @@
 use poulpy_core::layouts::{
-    Base2K, Dnum, Dsize, GGLWELayout, GGSWLayout, GLWEAutomorphismKeyLayout, GLWELayout, GLWETensorKeyLayout, GLWEToLWEKeyLayout, LWEInfos, LWELayout, LWEToGLWEKeyLayout, Rank, TorusPrecision
+    Base2K, Dnum, Dsize, GGLWELayout, GGSWLayout, GLWEAutomorphismKeyLayout, GLWELayout,
+    GLWETensorKeyLayout, GLWEToLWEKeyLayout, LWEInfos, LWELayout, LWEToGLWEKeyLayout, Rank,
+    TorusPrecision,
 };
 use poulpy_hal::{
     api::ModuleNew,
     layouts::{Backend, Module},
 };
-use poulpy_schemes::tfhe::{blind_rotation::BlindRotationKeyLayout, circuit_bootstrapping::CircuitBootstrappingKeyLayout};
+use poulpy_schemes::tfhe::{
+    blind_rotation::BlindRotationKeyLayout, circuit_bootstrapping::CircuitBootstrappingKeyLayout,
+};
 
 use crate::{Base2D, get_base_2d};
 
@@ -237,7 +241,7 @@ impl<B: Backend> Parameters<B> {
             k: self.glwe_ct_infos().k(),
             base2k: self.glwe_ct_infos().base2k(),
         }
-    }    
+    }
 
     pub fn lwe_pt_infos(&self) -> LWELayout {
         LWELayout {
@@ -245,58 +249,58 @@ impl<B: Backend> Parameters<B> {
             k: self.glwe_pt_infos().k() + 1,
             base2k: self.glwe_ct_infos().base2k(),
         }
-    }    
+    }
 
-    pub fn cbt_infos(&self) -> CircuitBootstrappingKeyLayout { // TODO: is K_EVK_TRACE correct?
+    pub fn cbt_infos(&self) -> CircuitBootstrappingKeyLayout {
+        // TODO: is K_EVK_TRACE correct?
         let cbt_infos: CircuitBootstrappingKeyLayout = CircuitBootstrappingKeyLayout {
-          layout_brk: BlindRotationKeyLayout {
-              n_glwe: self.module().n().into(),
-              n_lwe: self.module().n().into(),
-              base2k: self.basek().into(),
-              k: K_EVK_TRACE.into(),
-              dnum: K_EVK_TRACE.div_ceil(BASE2K).into(),
-              rank: RANK.into(),
-          },
-          layout_atk: GLWEAutomorphismKeyLayout {
-              n: self.module().n().into(),
-              base2k: self.basek().into(),
-              k: K_EVK_TRACE.into(),
-              dnum: K_EVK_TRACE.div_ceil(BASE2K).into(),
-              dsize: 1_u32.into(),
-              rank: RANK.into(),
-          },
-          layout_tsk: GLWETensorKeyLayout {
-              n: self.module().n().into(),
-              base2k: self.basek().into(),
-              k: K_EVK_TRACE.into(),
-              dnum: K_EVK_TRACE.div_ceil(BASE2K).into(),
-              dsize: 1_u32.into(),
-              rank: RANK.into(),
-          },
+            layout_brk: BlindRotationKeyLayout {
+                n_glwe: self.module().n().into(),
+                n_lwe: self.module().n().into(),
+                base2k: self.basek().into(),
+                k: K_EVK_TRACE.into(),
+                dnum: K_EVK_TRACE.div_ceil(BASE2K).into(),
+                rank: RANK.into(),
+            },
+            layout_atk: GLWEAutomorphismKeyLayout {
+                n: self.module().n().into(),
+                base2k: self.basek().into(),
+                k: K_EVK_TRACE.into(),
+                dnum: K_EVK_TRACE.div_ceil(BASE2K).into(),
+                dsize: 1_u32.into(),
+                rank: RANK.into(),
+            },
+            layout_tsk: GLWETensorKeyLayout {
+                n: self.module().n().into(),
+                base2k: self.basek().into(),
+                k: K_EVK_TRACE.into(),
+                dnum: K_EVK_TRACE.div_ceil(BASE2K).into(),
+                dsize: 1_u32.into(),
+                rank: RANK.into(),
+            },
         };
         cbt_infos
     }
 
     pub fn lwe_to_glwe_switching_key_infos(&self) -> LWEToGLWEKeyLayout {
         LWEToGLWEKeyLayout {
-          n: self.module().n().into(),
-          base2k: BASE2K.into(),
-          k: K_GLWE_CT.into(),
-          dnum: K_GLWE_CT.div_ceil(BASE2K).into(),
-          rank_out: RANK.into(),
+            n: self.module().n().into(),
+            base2k: BASE2K.into(),
+            k: K_GLWE_CT.into(),
+            dnum: K_GLWE_CT.div_ceil(BASE2K).into(),
+            rank_out: RANK.into(),
         }
-      }
-    
-      pub fn glwe_to_lwe_key_infos(&self) -> GLWEToLWEKeyLayout {
+    }
+
+    pub fn glwe_to_lwe_key_infos(&self) -> GLWEToLWEKeyLayout {
         GLWEToLWEKeyLayout {
-          n: self.module().n().into(),
-          base2k: BASE2K.into(),
-          k: K_GLWE_CT.into(),
-          dnum: K_GLWE_CT.div_ceil(BASE2K).into(),
-          rank_in: RANK.into(),
+            n: self.module().n().into(),
+            base2k: BASE2K.into(),
+            k: K_GLWE_CT.into(),
+            dnum: K_GLWE_CT.div_ceil(BASE2K).into(),
+            rank_in: RANK.into(),
         }
-      }
-    
+    }
 
     pub fn max_addr(&self) -> usize {
         self.max_addr

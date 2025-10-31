@@ -15,7 +15,10 @@ use poulpy_hal::{
     layouts::{Backend, DataRef, Module, Scratch, ScratchOwned},
     source::Source,
 };
-use poulpy_schemes::tfhe::{bdd_arithmetic::{BDDKeyPrepared, FheUint, UnsignedInteger}, blind_rotation::BlindRotationAlgo};
+use poulpy_schemes::tfhe::{
+    bdd_arithmetic::{BDDKeyPrepared, FheUint, UnsignedInteger},
+    blind_rotation::BlindRotationAlgo,
+};
 
 use crate::{
     Coordinate, CoordinatePrepared, CryptographicParameters, TakeCoordinatePrepared,
@@ -204,12 +207,18 @@ impl<B: Backend> Ram<B> {
     {
         let vec_glwe: Vec<GLWE<Vec<u8>>> = self.read(&address, keys);
 
-        let mut vec_glwe_fheuint: FheUint<Vec<u8>, T> = FheUint::alloc_from_infos(&self.params.ggsw_infos());
-        vec_glwe_fheuint.pack(self.params.module(), vec_glwe, bdd_key_prepared, self.scratch.borrow());
+        let mut vec_glwe_fheuint: FheUint<Vec<u8>, T> =
+            FheUint::alloc_from_infos(&self.params.ggsw_infos());
+        vec_glwe_fheuint.pack(
+            self.params.module(),
+            vec_glwe,
+            bdd_key_prepared,
+            self.scratch.borrow(),
+        );
 
         vec_glwe_fheuint
     }
-    
+
     /// Read that prepares the [Ram] of a subsequent [Self::write].
     /// Outside of preparing the [Ram] for a write, the Bhavior and
     /// output format is identical to [Self::read].

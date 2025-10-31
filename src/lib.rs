@@ -1,6 +1,7 @@
 mod address;
 mod arithmetic;
 mod base;
+pub(crate) mod codegen;
 mod conversion;
 mod coordinate;
 mod coordinate_prepared;
