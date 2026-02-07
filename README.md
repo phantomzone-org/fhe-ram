@@ -1,3 +1,10 @@
+# Discontinued
+
+This crate has been discontinued in favor of a better implementation in the [Phantom VM](https://github.com/phantomzone-org/phantom/blob/main/fhevm/src/memory.rs).  
+It is no longer maintained and will not compile with recent Poulpy versions.
+
+If you depend on this crate, you’ll need to migrate to Phantom or pin older Poulpy versions.
+
 # FHE-RAM: Encrypted Random Access Memory
 
 This repository demonstrates how [Poulpy](https://github.com/phantomzone-org/poulpy), a modular and high-performance lattice-based FHE library, can be used to implement fully homomorphic encrypted read/write RAM.
